@@ -26,32 +26,47 @@ def get_images(url):
 
     images = []
 
-    # og:image
-    og = soup.find(
-        "meta",
-        property="og:image"
+    # まず記事本文を探す
+    article = (
+        soup.find("article")
+        or soup.find(class_="box-article")
+        or soup.find(class_="box-content")
+        or soup.find(class_="entry-content")
+        or soup.find(class_="post-content")
+        or soup.find("main")
     )
 
-    if og and og.get("content"):
+    # 記事本文が見つかったらその中だけ検索
+    target = article if article else soup
 
-        images.append(
-            og["content"]
+    # og:image（記事の代表画像）
+    og = soup.find("meta", property="og:image")
+    if og and og.get("content"):
+        images.append(og["content"])
+
+    # 本文画像
+    for img in target.find_all("img"):
+
+        src = (
+            img.get("src")
+            or img.get("data-src")
+            or img.get("data-original")
+            or img.get("data-lazy-src")
         )
 
-    # imgタグ
-    for img in soup.find_all("img"):
+        if not src:
+            continue
 
-        src = img.get("src")
+        full_url = urljoin(url, src)
 
-        if src:
-
-            images.append(
-                urljoin(url, src)
-            )
+        images.append(full_url)
 
     # 重複削除
     images = list(dict.fromkeys(images))
 
     print(f"取得画像数: {len(images)}")
+
+    for image in images:
+        print(image)
 
     return images
