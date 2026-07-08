@@ -1,9 +1,7 @@
-import requests
-
+# instagram_api.py
 
 def get_instagram(url):
     """
-    Instagram APIから画像・動画URLを取得
+    Instagram URLから画像・動画を取得する
     """
-
     return []
