@@ -5,7 +5,11 @@ from urllib.parse import urljoin
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/137.0.0.0 Safari/537.36"
+    )
 }
 
 
@@ -26,25 +30,15 @@ def get_images(url):
 
     images = []
 
-    # まず記事本文を探す
-    article = (
-        soup.find("article")
-        or soup.find(class_="box-article")
-        or soup.find(class_="box-content")
-        or soup.find(class_="entry-content")
-        or soup.find(class_="post-content")
+    # 記事本文のみを対象にする
+    target = (
+        soup.find("div", class_="box-article")
+        or soup.find("article")
         or soup.find("main")
+        or soup
     )
 
-    # 記事本文が見つかったらその中だけ検索
-    target = article if article else soup
-
-    # og:image（記事の代表画像）
-    og = soup.find("meta", property="og:image")
-    if og and og.get("content"):
-        images.append(og["content"])
-
-    # 本文画像
+    # 本文内の画像だけ取得
     for img in target.find_all("img"):
 
         src = (
