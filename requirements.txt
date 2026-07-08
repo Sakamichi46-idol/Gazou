@@ -2,4 +2,3 @@ discord.py
 yt-dlp
 requests
 beautifulsoup4
-lxml
