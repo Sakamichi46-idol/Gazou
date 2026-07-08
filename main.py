@@ -3,7 +3,7 @@ import re
 
 import discord
 from discord.ext import commands
-
+from instagram_getter import get_instagram
 from image_getter import get_images
 from keep_alive import keep_alive
 
