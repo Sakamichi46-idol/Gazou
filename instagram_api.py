@@ -5,7 +5,7 @@ import requests
 def get_instagram(url):
     """
     Apify Instagram Post Scraperから
-    Instagram投稿の画像・動画URLを取得
+    Instagram投稿の画像・動画情報を取得
     """
 
     token = os.environ.get("APIFY_TOKEN")
@@ -51,7 +51,6 @@ def get_instagram(url):
     for item in result:
 
         # カルーセル投稿
-        # childPostsに複数画像・動画が入る形式
         if item.get("childPosts"):
 
             for child in item["childPosts"]:
@@ -59,39 +58,52 @@ def get_instagram(url):
                 # 画像
                 if child.get("displayUrl"):
                     media.append(
-                        child["displayUrl"]
+                        {
+                            "type": "image",
+                            "url": child["displayUrl"]
+                        }
                     )
 
                 # 動画
                 if child.get("videoUrl"):
                     media.append(
-                        child["videoUrl"]
+                        {
+                            "type": "video",
+                            "url": child["videoUrl"]
+                        }
                     )
 
         # images形式
-        # Sidecar投稿でまとめて返る場合
         if item.get("images"):
 
             for image in item["images"]:
                 media.append(
-                    image
+                    {
+                        "type": "image",
+                        "url": image
+                    }
                 )
 
-        # 通常投稿
-        # childPostsもimagesもない場合
+        # 通常画像
         if (
             not item.get("childPosts")
             and not item.get("images")
             and item.get("displayUrl")
         ):
             media.append(
-                item["displayUrl"]
+                {
+                    "type": "image",
+                    "url": item["displayUrl"]
+                }
             )
 
         # 通常動画
         if item.get("videoUrl"):
             media.append(
-                item["videoUrl"]
+                {
+                    "type": "video",
+                    "url": item["videoUrl"]
+                }
             )
 
     return media
