@@ -46,39 +46,39 @@ def get_instagram(url):
 
     result = response.json()
 
-    images = []
+    media = []
 
     for item in result:
 
-        # メイン画像
-        if item.get("displayUrl"):
-            images.append(
-                item["displayUrl"]
-            )
-
-        # 複数画像
-        if item.get("images"):
-            images.extend(
-                item["images"]
-            )
-
-        # カルーセル
+        # カルーセル投稿
         if item.get("childPosts"):
+
             for child in item["childPosts"]:
+
+                # 画像
                 if child.get("displayUrl"):
-                    images.append(
+                    media.append(
                         child["displayUrl"]
                     )
 
+                # 動画
                 if child.get("videoUrl"):
-                    images.append(
+                    media.append(
                         child["videoUrl"]
                     )
 
-        # 動画
-        if item.get("videoUrl"):
-            images.append(
-                item["videoUrl"]
-            )
+        else:
 
-    return images
+            # 通常画像
+            if item.get("displayUrl"):
+                media.append(
+                    item["displayUrl"]
+                )
+
+            # 通常動画
+            if item.get("videoUrl"):
+                media.append(
+                    item["videoUrl"]
+                )
+
+    return media
