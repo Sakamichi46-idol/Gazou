@@ -1,56 +1,81 @@
-import instaloader
-import tempfile
 import os
-import glob
+import requests
 
 
 def get_instagram(url):
+    """
+    Apifyを使ってInstagram投稿から画像・動画URLを取得
+    """
 
-    temp_dir = tempfile.mkdtemp()
+    token = os.environ.get("APIFY_TOKEN")
 
-    # URLから投稿コードを取得
-    shortcode = url.rstrip("/").split("/")[-1]
+    if not token:
+        raise Exception(
+            "APIFY_TOKENが設定されていません"
+        )
 
-    loader = instaloader.Instaloader(
-        dirname_pattern=temp_dir,
-        save_metadata=False,
-        download_comments=False
+    api_url = (
+        "https://api.apify.com/v2/acts/"
+        "apify~instagram-scraper/runs"
     )
 
-    try:
-        post = instaloader.Post.from_shortcode(
-            loader.context,
-            shortcode
-        )
+    payload = {
+        "directUrls": [
+            url
+        ],
+        "resultsLimit": 1
+    }
 
-        files = []
+    response = requests.post(
+        api_url,
+        params={
+            "token": token
+        },
+        json=payload
+    )
 
-        # 複数画像（カルーセル）対応
-        if post.typename == "GraphSidecar":
-
-            for node in post.get_sidecar_nodes():
-
-                if node.is_video:
-                    url = node.video_url
-                else:
-                    url = node.display_url
-
-                files.append(url)
-
-        # 動画投稿
-        elif post.is_video:
-
-            files.append(post.video_url)
-
-        # 通常画像
-        else:
-
-            files.append(post.url)
-
-        return files
-
-    except Exception as e:
-
+    if response.status_code != 201:
         raise Exception(
-            f"Instagram取得失敗: {e}"
+            f"Apify APIエラー: {response.text}"
         )
+
+    run = response.json()
+
+    dataset_id = run["data"]["defaultDatasetId"]
+
+    # 結果取得
+    dataset_url = (
+        f"https://api.apify.com/v2/datasets/"
+        f"{dataset_id}/items"
+    )
+
+    result = requests.get(
+        dataset_url,
+        params={
+            "token": token
+        }
+    ).json()
+
+    images = []
+
+    for item in result:
+
+        # 画像
+        if "displayUrl" in item:
+            images.append(
+                item["displayUrl"]
+            )
+
+        # カルーセル
+        if "images" in item:
+            images.extend(
+                item["images"]
+            )
+
+        # 動画
+        if "videoUrl" in item:
+            images.append(
+                item["videoUrl"]
+            )
+
+    return images
