@@ -2,158 +2,138 @@ import requests
 import yt_dlp
 
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/137.0 Safari/537.36"
+    )
+}
 
 
 def get_media(url):
+    """
+    URLから画像URL一覧を取得
+    """
 
-    result = []
+    images = []
 
+    # InstagramなどSNSはyt-dlpを優先
+    if any(site in url for site in [
+        "instagram.com",
+        "x.com",
+        "twitter.com",
+        "tiktok.com"
+    ]):
 
-    # まずyt-dlp
-    try:
+        try:
+            images = get_social_media(url)
 
-        result = get_ytdlp(url)
+            if images:
+                return images
 
-        if result:
-            return result
+        except Exception as e:
+            print(f"yt-dlp Error: {e}")
 
-    except Exception as e:
-
-        print(
-            "yt-dlp失敗:",
-            e
-        )
-
-
-    # 次にHTML
-    try:
-
-        result = get_html(url)
-
-        if result:
-            return result
-
-    except Exception as e:
-
-        print(
-            "HTML失敗:",
-            e
-        )
+    # 通常サイト
+    return get_html_images(url)
 
 
-    return []
-
-
-
-def get_ytdlp(url):
+def get_social_media(url):
 
     options = {
         "quiet": True,
-        "extract_flat": False,
         "skip_download": True,
     }
 
-
     with yt_dlp.YoutubeDL(options) as ydl:
 
-        info = ydl.extract_info(
-            url,
-            download=False
-        )
+        info = ydl.extract_info(url, download=False)
 
+    images = []
 
-    medias = []
+    # カルーセル
+    if info.get("entries"):
 
+        for entry in info["entries"]:
 
-    # Instagramカルーセル
-    if "entries" in info:
+            if entry.get("thumbnail"):
+                images.append(entry["thumbnail"])
 
-        for item in info["entries"]:
+            elif entry.get("url"):
+                images.append(entry["url"])
 
-            if item.get("url"):
-
-                medias.append(
-                    item["url"]
-                )
-
-
-    # 単体投稿
     else:
 
-        if info.get("url"):
-
-            medias.append(
-                info["url"]
-            )
-
-
         if info.get("thumbnail"):
+            images.append(info["thumbnail"])
 
-            medias.append(
-                info["thumbnail"]
-            )
+        elif info.get("url"):
+            images.append(info["url"])
 
-
-    return medias
-
+    return list(dict.fromkeys(images))
 
 
-def get_html(url):
+def get_html_images(url):
 
-    headers = {
-
-        "User-Agent":
-        (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64)"
-        )
-
-    }
-
-
-    r = requests.get(
+    response = requests.get(
         url,
-        headers=headers,
+        headers=HEADERS,
         timeout=15
     )
 
+    response.raise_for_status()
 
     soup = BeautifulSoup(
-        r.text,
+        response.text,
         "html.parser"
     )
 
+    images = []
 
-    medias = []
-
-
-    # Instagramでよく使われる
-    meta_tags = [
-
-        ("property", "og:image"),
-
-        ("property", "og:image:url"),
-
-        ("name", "twitter:image")
-
-    ]
-
-
-    for key, value in meta_tags:
+    # ---------- og:image ----------
+    for prop in [
+        "og:image",
+        "og:image:url",
+        "twitter:image"
+    ]:
 
         tag = soup.find(
             "meta",
-            {key:value}
+            attrs={"property": prop}
         )
 
+        if tag and tag.get("content"):
+            images.append(tag["content"])
+
+        tag = soup.find(
+            "meta",
+            attrs={"name": prop}
+        )
 
         if tag and tag.get("content"):
+            images.append(tag["content"])
 
-            medias.append(
-                tag["content"]
+    # ---------- imgタグ ----------
+    for img in soup.find_all("img"):
+
+        src = (
+            img.get("src")
+            or img.get("data-src")
+            or img.get("data-original")
+        )
+
+        if src:
+            images.append(
+                urljoin(url, src)
             )
 
+    # 重複削除
+    images = list(dict.fromkeys(images))
 
-    return list(
-        dict.fromkeys(medias)
-    )
+    print("取得画像数:", len(images))
+
+    return images
