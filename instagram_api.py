@@ -58,24 +58,27 @@ def get_instagram(url):
 
     images = []
 
-    for item in result:
+for item in result:
 
-        # 画像
-        if "displayUrl" in item:
-            images.append(
-                item["displayUrl"]
-            )
+    # 通常画像
+    if item.get("displayUrl"):
+        images.append(item["displayUrl"])
 
-        # カルーセル
-        if "images" in item:
-            images.extend(
-                item["images"]
-            )
+    # 複数画像
+    if item.get("images"):
+        images.extend(item["images"])
 
-        # 動画
-        if "videoUrl" in item:
-            images.append(
-                item["videoUrl"]
-            )
+    # カルーセル
+    if item.get("childPosts"):
+        for child in item["childPosts"]:
+            if child.get("displayUrl"):
+                images.append(child["displayUrl"])
 
-    return images
+            if child.get("videoUrl"):
+                images.append(child["videoUrl"])
+
+    # 動画
+    if item.get("videoUrl"):
+        images.append(item["videoUrl"])
+
+return images
