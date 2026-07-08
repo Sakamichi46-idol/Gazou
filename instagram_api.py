@@ -50,35 +50,38 @@ def get_instagram(url):
 
     for item in result:
 
-        # カルーセル投稿
+        # カルーセル画像
+        # ApifyではSidecar投稿の画像がここに入る
+        if item.get("images"):
+            media.extend(
+                item["images"]
+            )
+
+        # 通常投稿画像
+        elif item.get("displayUrl"):
+            media.append(
+                item["displayUrl"]
+            )
+
+        # 投稿全体の動画
+        if item.get("videoUrl"):
+            media.append(
+                item["videoUrl"]
+            )
+
+        # childPosts内の画像・動画
         if item.get("childPosts"):
 
             for child in item["childPosts"]:
 
-                # 画像
                 if child.get("displayUrl"):
                     media.append(
                         child["displayUrl"]
                     )
 
-                # 動画
                 if child.get("videoUrl"):
                     media.append(
                         child["videoUrl"]
                     )
-
-        else:
-
-            # 通常画像
-            if item.get("displayUrl"):
-                media.append(
-                    item["displayUrl"]
-                )
-
-            # 通常動画
-            if item.get("videoUrl"):
-                media.append(
-                    item["videoUrl"]
-                )
 
     return media
