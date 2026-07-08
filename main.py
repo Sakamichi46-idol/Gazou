@@ -3,8 +3,9 @@ import re
 
 import discord
 from discord.ext import commands
-from instagram_getter import get_instagram
+
 from image_getter import get_images
+from instagram_getter import get_instagram
 from keep_alive import keep_alive
 
 intents = discord.Intents.default()
@@ -27,7 +28,10 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    urls = re.findall(r"https?://\S+", message.content)
+    urls = re.findall(
+        r"https?://\S+",
+        message.content
+    )
 
     if urls:
 
@@ -37,7 +41,15 @@ async def on_message(message):
 
         try:
 
-            images = get_images(url)
+            # InstagramならInstagram専用処理
+            if "instagram.com" in url:
+
+                images = get_instagram(url)
+
+            # それ以外はブログなど
+            else:
+
+                images = get_images(url)
 
             if images:
 
@@ -61,4 +73,6 @@ async def on_message(message):
 
 keep_alive()
 
-bot.run(os.environ["DISCORD_TOKEN"])
+bot.run(
+    os.environ["DISCORD_TOKEN"]
+)
