@@ -37,30 +37,50 @@ async def on_message(message):
 
         url = urls[0]
 
-        await message.channel.send("画像取得中...")
+        await message.channel.send(
+            "画像取得中..."
+        )
 
         try:
 
-            # InstagramならInstagram専用処理
+            # Instagram
             if "instagram.com" in url:
 
-                images = get_instagram(url)
+                media = get_instagram(url)
 
-            # それ以外はブログなど
+                if media:
+
+                    for item in media:
+
+                        await message.channel.send(
+                            item["url"]
+                        )
+
+                else:
+
+                    await message.channel.send(
+                        "画像が見つかりませんでした。"
+                    )
+
+            # ブログなど
             else:
 
                 images = get_images(url)
 
-            if images:
+                if images:
 
-                for image in images:
-                    await message.channel.send(image)
+                    for image in images:
 
-            else:
+                        await message.channel.send(
+                            image
+                        )
 
-                await message.channel.send(
-                    "画像が見つかりませんでした。"
-                )
+                else:
+
+                    await message.channel.send(
+                        "画像が見つかりませんでした。"
+                    )
+
 
         except Exception as e:
 
