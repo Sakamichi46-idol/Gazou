@@ -1,13 +1,15 @@
 import os
 import re
+
 import discord
 from discord.ext import commands
 
-from image_getter import get_images
+from media_getter import get_media
 
 
 intents = discord.Intents.default()
 intents.message_content = True
+
 
 bot = commands.Bot(
     command_prefix="!",
@@ -17,50 +19,65 @@ bot = commands.Bot(
 
 @bot.event
 async def on_ready():
-    print(f"ログイン成功: {bot.user}")
+    print(
+        f"ログインしました: {bot.user}"
+    )
 
 
 @bot.event
 async def on_message(message):
 
-    # Bot自身のメッセージは無視
     if message.author.bot:
         return
 
-    # URLを探す
+
     urls = re.findall(
-        r"https?://[^\s]+",
+        r"https?://\S+",
         message.content
     )
+
 
     if urls:
 
         url = urls[0]
 
-        await message.channel.send(
-            "画像を取得中..."
-        )
 
-        try:
-            images = get_images(url)
-
-            if images:
-
-                for image in images[:5]:
-                    await message.channel.send(image)
-
-            else:
-                await message.channel.send(
-                    "画像が見つかりませんでした"
-                )
-
-        except Exception as e:
+        if "instagram.com" in url:
 
             await message.channel.send(
-                f"取得エラー: {e}"
+                "Instagram画像取得中..."
             )
 
+
+            try:
+
+                medias = get_media(url)
+
+
+                if medias:
+
+                    for media in medias[:10]:
+
+                        await message.channel.send(
+                            media
+                        )
+
+                else:
+
+                    await message.channel.send(
+                        "画像を取得できませんでした"
+                    )
+
+
+            except Exception as e:
+
+                await message.channel.send(
+                    f"エラー: {e}"
+                )
+
+
     await bot.process_commands(message)
+
 
 
 bot.run(
