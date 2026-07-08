@@ -41,7 +41,7 @@ async def on_message(message):
 
             if images:
 
-                for image in images[:5]:
+                for image in images:
                     await message.channel.send(image)
 
             else:
