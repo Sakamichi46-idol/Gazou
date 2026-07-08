@@ -39,7 +39,7 @@ def get_instagram(url):
         timeout=120
     )
 
-    if response.status_code != 200:
+    if response.status_code not in [200, 201]:
         raise Exception(
             f"Apify APIエラー: {response.text}"
         )
