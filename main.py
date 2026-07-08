@@ -5,7 +5,7 @@ import discord
 from discord.ext import commands
 
 from image_getter import get_images
-from instagram_getter import get_instagram
+from instagram_api import get_instagram
 from keep_alive import keep_alive
 
 intents = discord.Intents.default()
