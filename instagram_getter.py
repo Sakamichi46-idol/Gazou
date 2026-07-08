@@ -1,22 +1,22 @@
-import yt_dlp
+import instaloader
 
 
 def get_instagram(url):
 
-    ydl_opts = {
-        "quiet": False,
-        "skip_download": True,
-    }
+    print("Instagramアクセス開始")
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    L = instaloader.Instaloader()
 
-    print("========== Instagram ==========")
-    print("type:", info.get("_type"))
-    print("id:", info.get("id"))
-    print("title:", info.get("title"))
-    print("thumbnail:", info.get("thumbnail"))
-    print("keys:", list(info.keys()))
-    print("===============================")
+    shortcode = url.split("/p/")[1].split("/")[0]
+
+    print("Shortcode:", shortcode)
+
+    post = instaloader.Post.from_shortcode(
+        L.context,
+        shortcode
+    )
+
+    print("取得成功")
+    print(post)
 
     return []
