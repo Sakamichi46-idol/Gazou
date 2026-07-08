@@ -4,7 +4,8 @@ import requests
 
 def get_instagram(url):
     """
-    Apifyを使ってInstagram投稿から画像・動画URLを取得
+    Apify Instagram Post Scraperから
+    Instagram投稿の画像・動画URLを取得
     """
 
     token = os.environ.get("APIFY_TOKEN")
@@ -16,14 +17,17 @@ def get_instagram(url):
 
     api_url = (
         "https://api.apify.com/v2/acts/"
-        "apify~instagram-scraper/runs"
+        "nH2AHrwxeTRJoN5hX/"
+        "run-sync-get-dataset-items"
     )
 
     payload = {
-        "directUrls": [
+        "dataDetailLevel": "basicData",
+        "resultsLimit": 1,
+        "skipPinnedPosts": False,
+        "username": [
             url
-        ],
-        "resultsLimit": 1
+        ]
     }
 
     response = requests.post(
@@ -31,42 +35,28 @@ def get_instagram(url):
         params={
             "token": token
         },
-        json=payload
+        json=payload,
+        timeout=120
     )
 
-    if response.status_code != 201:
+    if response.status_code != 200:
         raise Exception(
             f"Apify APIエラー: {response.text}"
         )
 
-    run = response.json()
-
-    dataset_id = run["data"]["defaultDatasetId"]
-
-    # 結果取得
-    dataset_url = (
-        f"https://api.apify.com/v2/datasets/"
-        f"{dataset_id}/items"
-    )
-
-    result = requests.get(
-        dataset_url,
-        params={
-            "token": token
-        }
-    ).json()
+    result = response.json()
 
     images = []
 
     for item in result:
 
-        # 通常画像
+        # メイン画像
         if item.get("displayUrl"):
             images.append(
                 item["displayUrl"]
             )
 
-        # 複数画像（別形式の場合）
+        # 複数画像
         if item.get("images"):
             images.extend(
                 item["images"]
@@ -75,7 +65,6 @@ def get_instagram(url):
         # カルーセル
         if item.get("childPosts"):
             for child in item["childPosts"]:
-
                 if child.get("displayUrl"):
                     images.append(
                         child["displayUrl"]
