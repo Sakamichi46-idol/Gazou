@@ -79,7 +79,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-
+keep_alive()
 bot.run(
     os.environ["DISCORD_TOKEN"]
 )
