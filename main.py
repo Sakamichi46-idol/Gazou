@@ -1,6 +1,7 @@
+import os
+import re
 import discord
 from discord.ext import commands
-import re
 
 from image_getter import get_images
 
@@ -16,17 +17,19 @@ bot = commands.Bot(
 
 @bot.event
 async def on_ready():
-    print(f"ログインしました: {bot.user}")
+    print(f"ログイン成功: {bot.user}")
 
 
 @bot.event
 async def on_message(message):
 
+    # Bot自身のメッセージは無視
     if message.author.bot:
         return
 
+    # URLを探す
     urls = re.findall(
-        r"https?://\S+",
+        r"https?://[^\s]+",
         message.content
     )
 
@@ -34,23 +37,32 @@ async def on_message(message):
 
         url = urls[0]
 
+        await message.channel.send(
+            "画像を取得中..."
+        )
+
         try:
             images = get_images(url)
 
             if images:
-                for img in images[:5]:
-                    await message.channel.send(img)
+
+                for image in images[:5]:
+                    await message.channel.send(image)
+
             else:
                 await message.channel.send(
                     "画像が見つかりませんでした"
                 )
 
         except Exception as e:
+
             await message.channel.send(
-                f"エラー: {e}"
+                f"取得エラー: {e}"
             )
 
     await bot.process_commands(message)
 
 
-bot.run("ここにDiscord Bot Token")
+bot.run(
+    os.environ["DISCORD_TOKEN"]
+)
