@@ -1,25 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+
 # Environment variables
 .env
 
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environment
-venv/
-.venv/
-env/
-
-# Distribution / build
-build/
-dist/
-*.egg-info/
-
-# IDE
+# VS Code
 .vscode/
-.idea/
 
-# OS files
+# macOS
 .DS_Store
+
+# Windows
 Thumbs.db
