@@ -2,7 +2,6 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
 }
@@ -14,7 +13,32 @@ def get_images(url):
 
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # 記事本文を探す
+    blog = {
+        "title": "",
+        "member": "",
+        "date": "",
+        "images": []
+    }
+
+    # タイトル
+    title_tag = (
+        soup.find("h1")
+        or soup.find("h1", class_="bd--hd__ttl")
+    )
+    if title_tag:
+        blog["title"] = title_tag.get_text(strip=True)
+
+    # メンバー名
+    member_tag = soup.find(class_="bd--prof__name")
+    if member_tag:
+        blog["member"] = member_tag.get_text(strip=True)
+
+    # 投稿日
+    date_tag = soup.find(class_="bd--hd__date")
+    if date_tag:
+        blog["date"] = date_tag.get_text(strip=True)
+
+    # ブログ本文
     article = (
         soup.find("div", class_="bd--edit")
         or soup.find("article")
@@ -24,7 +48,6 @@ def get_images(url):
     if article is None:
         article = soup
 
-    images = []
     seen = set()
 
     for img in article.find_all("img"):
@@ -35,7 +58,7 @@ def get_images(url):
 
         src = urljoin(url, src)
 
-        # ブログ画像以外を除外
+        # ブログ画像だけ取得
         if "/files/46/diary/" not in src:
             continue
 
@@ -43,6 +66,6 @@ def get_images(url):
             continue
 
         seen.add(src)
-        images.append(src)
+        blog["images"].append(src)
 
-    return images
+    return blog
