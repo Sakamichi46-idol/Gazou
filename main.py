@@ -18,6 +18,8 @@ bot = commands.Bot(
     intents=intents
 )
 
+url_pattern = re.compile(r"https?://\S+")
+
 
 @bot.event
 async def on_ready():
@@ -27,9 +29,6 @@ async def on_ready():
 @bot.command()
 async def ping(ctx):
     await ctx.send("Pong!")
-
-
-url_pattern = re.compile(r"https?://\S+")
 
 
 @bot.event
@@ -49,8 +48,24 @@ async def on_message(message):
 
             await message.channel.send(f"{len(images)}枚の画像が見つかりました。")
 
-            for image in images[:10]:
-                await message.channel.send(image)
+            async with aiohttp.ClientSession() as session:
+                for i, image_url in enumerate(images[:10], start=1):
+                    try:
+                        async with session.get(image_url) as resp:
+                            if resp.status != 200:
+                                continue
+
+                            data = await resp.read()
+
+                            file = discord.File(
+                                io.BytesIO(data),
+                                filename=f"image{i}.jpg"
+                            )
+
+                            await message.channel.send(file=file)
+
+                    except Exception as e:
+                        print(f"画像取得エラー: {e}")
 
         except Exception as e:
             await message.channel.send(f"エラー: {e}")
