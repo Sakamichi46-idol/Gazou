@@ -51,10 +51,10 @@ def get_hinatazaka_images(url):
         )
     )
 
-if member:
-    blog["member"] = member.get_text(
-        strip=True
-    )
+    if member:
+        blog["member"] = member.get_text(
+            strip=True
+        )
 
     # 投稿日
     date = (
