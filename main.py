@@ -1,9 +1,11 @@
 import os
+import re
+import io
 
+import aiohttp
 import discord
 from discord.ext import commands
 
-import re
 from image_getter import get_images
 
 TOKEN = os.getenv("TOKEN")
