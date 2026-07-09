@@ -1,7 +1,4 @@
 discord.py
-flask
 requests
 beautifulsoup4
-lxml
-yt-dlp
-instaloader
+python-dotenv
