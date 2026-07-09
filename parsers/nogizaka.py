@@ -52,7 +52,9 @@ def get_nogizaka_images(url):
     )
 
     if date:
-        blog["date"] = date.get_text(strip=True)
+        blog["date"] = normalize_date(
+        date.get_text(strip=True)
+        )
 
 
     # 本文部分
