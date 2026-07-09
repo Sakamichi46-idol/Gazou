@@ -46,7 +46,7 @@ async def on_message(message):
                 await message.channel.send("画像が見つかりませんでした。")
                 continue
 
-            await message.channel.send(f"{len(images)}枚の画像が見つかりました。")
+            files = []
 
             async with aiohttp.ClientSession() as session:
                 for i, image_url in enumerate(images[:10], start=1):
@@ -57,15 +57,23 @@ async def on_message(message):
 
                             data = await resp.read()
 
-                            file = discord.File(
-                                io.BytesIO(data),
-                                filename=f"image{i}.jpg"
+                            files.append(
+                                discord.File(
+                                    io.BytesIO(data),
+                                    filename=f"image{i}.jpg"
+                                )
                             )
-
-                            await message.channel.send(file=file)
 
                     except Exception as e:
                         print(f"画像取得エラー: {e}")
+
+            if files:
+                await message.channel.send(
+                    content=f"📷 ブログ画像（{len(files)}枚）",
+                    files=files
+                )
+            else:
+                await message.channel.send("画像を取得できませんでした。")
 
         except Exception as e:
             await message.channel.send(f"エラー: {e}")
