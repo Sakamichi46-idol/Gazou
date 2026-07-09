@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-
+from parsers.utils import normalize_datetime
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
@@ -40,14 +40,21 @@ def get_hinatazaka_images(url):
 
     # メンバー名
     member = (
-        soup.find(class_="c-blog-article__name")
-        or soup.find(class_="name")
-        or soup.find(class_="bd--prof__name")
+        soup.find(
+            class_="c-blog-article__name"
+        )
+        or soup.find(
+            class_="name"
+        )
+        or soup.find(
+            class_="bd--prof__name"
+        )
     )
 
-    if member:
-        blog["member"] = member.get_text(strip=True)
-
+if member:
+    blog["member"] = member.get_text(
+        strip=True
+    )
 
     # 投稿日
     date = (
@@ -57,7 +64,12 @@ def get_hinatazaka_images(url):
     )
 
     if date:
-        blog["date"] = date.get_text(strip=True)
+        blog["date"] = normalize_datetime(
+            date.get_text(
+                " ",
+                strip=True
+            )
+        )
 
 
     # 本文
