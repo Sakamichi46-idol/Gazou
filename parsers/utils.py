@@ -1,7 +1,7 @@
 import re
 
 
-def normalize_date(date_text):
+def normalize_datetime(date_text):
     if not date_text:
         return ""
 
@@ -17,4 +17,13 @@ def normalize_date(date_text):
     month = numbers[1].zfill(2)
     day = numbers[2].zfill(2)
 
-    return f"{year}年{month}月{day}日"
+    result = f"{year}年{month}月{day}日"
+
+    # 時刻がある場合
+    if len(numbers) >= 5:
+        hour = numbers[3].zfill(2)
+        minute = numbers[4].zfill(2)
+
+        result += f" {hour}:{minute}"
+
+    return result
