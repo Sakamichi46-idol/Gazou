@@ -3,19 +3,31 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 
-def get_images(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
 
-    response = requests.get(url, headers=headers, timeout=10)
+
+def get_images(url):
+    response = requests.get(url, headers=HEADERS, timeout=10)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
 
-    images = []
+    # 記事本文を探す
+    article = (
+        soup.find("div", class_="bd--edit")
+        or soup.find("article")
+        or soup.find("main")
+    )
 
-    for img in soup.find_all("img"):
+    if article is None:
+        article = soup
+
+    images = []
+    seen = set()
+
+    for img in article.find_all("img"):
         src = img.get("src")
 
         if not src:
@@ -23,7 +35,14 @@ def get_images(url):
 
         src = urljoin(url, src)
 
-        if src not in images:
-            images.append(src)
+        # ブログ画像以外を除外
+        if "/files/46/diary/" not in src:
+            continue
+
+        if src in seen:
+            continue
+
+        seen.add(src)
+        images.append(src)
 
     return images
