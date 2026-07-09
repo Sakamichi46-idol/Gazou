@@ -1,71 +1,16 @@
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+from parsers.nogizaka import get_nogizaka_images
+from parsers.sakurazaka import get_sakurazaka_images
+from parsers.hinatazaka import get_hinatazaka_images
 
 
 def get_images(url):
-    response = requests.get(url, headers=HEADERS, timeout=10)
-    response.raise_for_status()
+    if "nogizaka46.com" in url:
+        return get_nogizaka_images(url)
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    elif "sakurazaka46.com" in url:
+        return get_sakurazaka_images(url)
 
-    blog = {
-        "title": "",
-        "member": "",
-        "date": "",
-        "images": []
-    }
+    elif "hinatazaka46.com" in url:
+        return get_hinatazaka_images(url)
 
-    # タイトル
-    title_tag = (
-        soup.find("h1")
-        or soup.find("h1", class_="bd--hd__ttl")
-    )
-    if title_tag:
-        blog["title"] = title_tag.get_text(strip=True)
-
-    # メンバー名
-    member_tag = soup.find(class_="bd--prof__name")
-    if member_tag:
-        blog["member"] = member_tag.get_text(strip=True)
-
-    # 投稿日
-    date_tag = soup.find(class_="bd--hd__date")
-    if date_tag:
-        blog["date"] = date_tag.get_text(strip=True)
-
-    # ブログ本文
-    article = (
-        soup.find("div", class_="bd--edit")
-        or soup.find("article")
-        or soup.find("main")
-    )
-
-    if article is None:
-        article = soup
-
-    seen = set()
-
-    for img in article.find_all("img"):
-        src = img.get("src")
-
-        if not src:
-            continue
-
-        src = urljoin(url, src)
-
-        # ブログ画像だけ取得
-        if "/files/46/diary/" not in src:
-            continue
-
-        if src in seen:
-            continue
-
-        seen.add(src)
-        blog["images"].append(src)
-
-    return blog
+    raise ValueError("対応していないURLです。")
