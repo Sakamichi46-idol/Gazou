@@ -1,69 +1,100 @@
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+import os
+import re
+import io
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+import aiohttp
+import discord
+from discord.ext import commands
 
-def get_images(url):
-    response = requests.get(url, headers=HEADERS, timeout=10)
-    response.raise_for_status()
+from image_getter import get_images
 
-    soup = BeautifulSoup(response.text, "html.parser")
+TOKEN = os.getenv("TOKEN")
 
-    title = ""
-    member = ""
-    date = ""
+intents = discord.Intents.default()
+intents.message_content = True
 
-    # タイトル
-    title_tag = soup.find("h1")
-    if title_tag:
-        title = title_tag.get_text(strip=True)
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents
+)
 
-    # メンバー
-    member_tag = soup.find(class_="bd--prof__name")
-    if member_tag:
-        member = member_tag.get_text(strip=True)
+url_pattern = re.compile(r"https?://\S+")
 
-    # 投稿日
-    date_tag = soup.find(class_="bd--hd__date")
-    if date_tag:
-        date = date_tag.get_text(strip=True)
 
-    # 本文
-    article = (
-        soup.find("div", class_="bd--edit")
-        or soup.find("article")
-        or soup.find("main")
-    )
+@bot.event
+async def on_ready():
+    print(f"{bot.user} が起動しました！")
 
-    if article is None:
-        article = soup
 
-    images = []
-    seen = set()
+@bot.command()
+async def ping(ctx):
+    await ctx.send("Pong!")
 
-    for img in article.find_all("img"):
-        src = img.get("src")
 
-        if not src:
-            continue
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
 
-        src = urljoin(url, src)
+    urls = url_pattern.findall(message.content)
 
-        if "/files/46/diary/" not in src:
-            continue
+    for url in urls:
+        try:
+            blog = get_images(url)
 
-        if src in seen:
-            continue
+            images = blog["images"]
 
-        seen.add(src)
-        images.append(src)
+            if not images:
+                await message.channel.send("画像が見つかりませんでした。")
+                continue
 
-    return {
-        "title": title,
-        "member": member,
-        "date": date,
-        "images": images
-    }
+            files = []
+
+            async with aiohttp.ClientSession() as session:
+                for i, image_url in enumerate(images[:10], start=1):
+                    try:
+                        async with session.get(image_url) as resp:
+                            if resp.status != 200:
+                                continue
+
+                            data = await resp.read()
+
+                            files.append(
+                                discord.File(
+                                    io.BytesIO(data),
+                                    filename=f"image{i}.jpg"
+                                )
+                            )
+
+                    except Exception as e:
+                        print(f"画像取得エラー: {e}")
+
+            text = ""
+
+            if blog["member"]:
+                text += f"👤 {blog['member']}\n"
+
+            if blog["title"]:
+                text += f"📝 {blog['title']}\n"
+
+            if blog["date"]:
+                text += f"📅 {blog['date']}\n"
+
+            text += f"\n📷 ブログ画像（{len(files)}枚）"
+
+            if files:
+                await message.channel.send(
+                    content=text,
+                    files=files
+                )
+            else:
+                await message.channel.send("画像を取得できませんでした。")
+
+        except Exception as e:
+            print(e)
+            await message.channel.send(f"エラー: {e}")
+
+    await bot.process_commands(message)
+
+
+bot.run(TOKEN)
