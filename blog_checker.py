@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 
-
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 "
@@ -16,9 +15,6 @@ HEADERS = {
     ),
     "Referer": "https://www.nogizaka46.com/"
 }
-
-
-
 
 
 # =========================
@@ -32,7 +28,6 @@ def get_nogizaka_latest():
         "/s/n46/api/list/blog"
     )
 
-
     try:
 
         response = requests.get(
@@ -41,15 +36,12 @@ def get_nogizaka_latest():
             timeout=10
         )
 
-
         print(
             "乃木坂 API STATUS:",
             response.status_code
         )
 
-
         response.raise_for_status()
-
 
 
         match = re.search(
@@ -59,13 +51,8 @@ def get_nogizaka_latest():
 
 
         if not match:
-
-            print(
-                "乃木坂API解析失敗"
-            )
-
+            print("乃木坂API解析失敗")
             return None
-
 
 
         data = json.loads(
@@ -73,15 +60,11 @@ def get_nogizaka_latest():
         )
 
 
-
         if not data.get("data"):
-
             return None
 
 
-
         blog = data["data"][0]
-
 
 
         result = {
@@ -116,7 +99,6 @@ def get_nogizaka_latest():
         }
 
 
-
         print(
             "乃木坂取得:",
             result
@@ -124,7 +106,6 @@ def get_nogizaka_latest():
 
 
         return result
-
 
 
     except Exception as e:
@@ -135,10 +116,6 @@ def get_nogizaka_latest():
         )
 
         return None
-
-
-
-
 
 
 
@@ -156,12 +133,12 @@ def get_sakurazaka_latest():
 
     try:
 
-        # 一覧取得
         response = requests.get(
             list_url,
             headers=HEADERS,
             timeout=10
         )
+
 
         response.raise_for_status()
 
@@ -204,7 +181,6 @@ def get_sakurazaka_latest():
         )
 
 
-
         member = article.select_one(
             ".name"
         )
@@ -213,7 +189,6 @@ def get_sakurazaka_latest():
         title = article.select_one(
             ".title"
         )
-
 
 
         # =====================
@@ -226,6 +201,7 @@ def get_sakurazaka_latest():
             timeout=10
         )
 
+
         detail_response.raise_for_status()
 
 
@@ -237,32 +213,25 @@ def get_sakurazaka_latest():
 
         date = ""
 
-        # 候補1
+
+        # 櫻坂詳細ページの日付
         date_tag = detail_soup.select_one(
-            ".date"
+            ".bd--hd__date"
         )
 
 
         if date_tag:
 
             date = date_tag.get_text(
+                " ",
                 strip=True
             )
 
 
-        # 候補2 timeタグ
-        if not date:
-
-            time_tag = detail_soup.select_one(
-                "time"
-            )
-
-            if time_tag:
-
-                date = time_tag.get_text(
-                    strip=True
-                )
-
+        print(
+            "櫻坂詳細日付:",
+            date
+        )
 
 
         result = {
@@ -293,7 +262,6 @@ def get_sakurazaka_latest():
         }
 
 
-
         print(
             "櫻坂取得:",
             result
@@ -312,9 +280,6 @@ def get_sakurazaka_latest():
         )
 
         return None
-
-
-
 
 
 
@@ -385,10 +350,6 @@ def get_hinatazaka_latest():
 
         if not link:
 
-            print(
-                "日向坂URL取得失敗"
-            )
-
             return None
 
 
@@ -442,8 +403,6 @@ def get_hinatazaka_latest():
 
 
 
-
-
 # =========================
 # 全グループ取得
 # =========================
@@ -464,12 +423,9 @@ def get_latest_blog():
     ]
 
 
-
     for func in funcs:
 
-
         blog = func()
-
 
 
         if isinstance(
@@ -480,7 +436,6 @@ def get_latest_blog():
             results.append(
                 blog
             )
-
 
 
     print(
