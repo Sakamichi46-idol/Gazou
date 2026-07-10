@@ -1,18 +1,15 @@
 import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 import json
 import re
 
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/126.0.0.0 Safari/537.36"
+        "Chrome/120 Safari/537.36"
     ),
-    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     "Referer": "https://www.nogizaka46.com/"
 }
 
@@ -25,15 +22,9 @@ def get_nogizaka_latest():
     )
 
 
-    session = requests.Session()
-
-    session.headers.update(
-        HEADERS
-    )
-
-
-    response = session.get(
+    response = requests.get(
         url,
+        headers=HEADERS,
         timeout=10
     )
 
@@ -44,22 +35,33 @@ def get_nogizaka_latest():
     )
 
 
-    print(
-        response.text[:500]
-    )
-
-
     response.raise_for_status()
 
 
+    # JSONP → JSONへ変換
     text = response.text
 
-    json_text = re.search(
+
+    match = re.search(
         r"res\((.*)\)",
         text
-    ).group(1)
+    )
 
-    data = json.loads(json_text)
+
+    if not match:
+        print(
+            "乃木坂API解析失敗"
+        )
+        return None
+
+
+    data = json.loads(
+        match.group(1)
+    )
+
+
+    if not data.get("data"):
+        return None
 
 
     blog = data["data"][0]
@@ -67,15 +69,13 @@ def get_nogizaka_latest():
 
     return {
         "group": "乃木坂46",
-        "url": blog["link"],
-        "member": blog["name"],
-        "title": blog["title"],
-        "date": blog["date"],
-        "text": blog["text"]
+        "url": blog.get("link", ""),
+        "member": blog.get("name", ""),
+        "title": blog.get("title", ""),
+        "date": blog.get("date", ""),
+        "text": blog.get("text", "")
     }
 
-
-    return None
 
 
 def get_sakurazaka_latest():
@@ -105,9 +105,7 @@ def get_latest_blog():
     for blog in blogs:
 
         if blog:
-            results.append(
-                blog
-            )
+            results.append(blog)
 
 
     return results
