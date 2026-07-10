@@ -7,12 +7,7 @@ import discord
 from blog_checker import get_latest_blog
 from image_getter import get_images
 from config import BLOG_CHANNELS
-from database import (
-    is_notified,
-    save_blog
-)
-
-
+from database import is_notified, save_blog
 
 
 
@@ -22,7 +17,10 @@ async def send_images(channel, images):
 
         files = []
 
-        for i, image_url in enumerate(images, start=1):
+        for i, image_url in enumerate(
+            images,
+            start=1
+        ):
 
             try:
 
@@ -76,72 +74,125 @@ async def check_blog(bot):
             blogs = get_latest_blog()
 
 
+            if not blogs:
+                print(
+                    "ブログ取得なし"
+                )
+
+                await asyncio.sleep(600)
+                continue
+
+
+
             for blog in blogs:
 
-                group = blog["group"]
+                url = blog.get(
+                    "url"
+                )
 
-                url = blog["url"]
 
-
-                # 送信済みならスキップ
-                if is_notified(url):
+                if not url:
                     continue
 
 
 
-                    channel_id = BLOG_CHANNELS.get(
-                        group
+                # 送信済みならスキップ
+
+                if is_notified(url):
+
+                    continue
+
+
+
+                group = blog.get(
+                    "group"
+                )
+
+
+                channel_id = BLOG_CHANNELS.get(
+                    group
+                )
+
+
+                if not channel_id:
+
+                    print(
+                        f"{group} のチャンネル未設定"
                     )
 
-
-                    if not channel_id:
-                        continue
+                    continue
 
 
-                    channel = bot.get_channel(
+
+                channel = bot.get_channel(
+                    channel_id
+                )
+
+
+                if channel is None:
+
+                    print(
+                        "チャンネル取得失敗:",
                         channel_id
                     )
 
-
-                    if not channel:
-                        continue
+                    continue
 
 
 
-                    # 通知
+                # ブログ情報送信
+
+                await channel.send(
+                    f"🏷️ {group}\n"
+                    f"👤 {blog.get('member','')}\n"
+                    f"📝 {blog.get('title','')}\n"
+                    f"📅 {blog.get('date','')}\n"
+                    f"🔗 {url}"
+                )
+
+
+
+                # 画像取得
+
+                detail = get_images(
+                    url
+                )
+
+
+                images = detail.get(
+                    "images",
+                    []
+                )
+
+
+
+                if images:
+
                     await channel.send(
-                        f"🏷️ {blog['group']}\n"
-                        f"👤 {blog['member']}\n"
-                        f"📝 {blog['title']}\n"
-                        f"📅 {blog['date']}\n"
-                        f"🔗 {blog['url']}"
+                        f"📷 ブログ画像 "
+                        f"({len(images)}枚)"
+                    )
+
+
+                    await send_images(
+                        channel,
+                        images
+                    )
+
+
+                else:
+
+                    await channel.send(
+                        "画像はありませんでした。"
                     )
 
 
 
-                    # 画像取得
+                # 通知済みに保存
 
-                    detail = get_images(
-                        blog["url"]
-                    )
-
-
-                    images = detail["images"]
-
-
-                    if images:
-
-                        await channel.send(
-                            f"📷 ブログ画像 "
-                            f"({len(images)}枚)"
-                        )
-
-
-                        await send_images(
-                            channel,
-                            images
-                        )
-                    save_blog(url)
+                save_blog(
+                    url
+                )
 
 
 
