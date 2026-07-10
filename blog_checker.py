@@ -14,6 +14,7 @@ HEADERS = {
 }
 
 
+
 def get_nogizaka_latest():
 
     url = (
@@ -38,7 +39,6 @@ def get_nogizaka_latest():
     response.raise_for_status()
 
 
-    # JSONP → JSONへ変換
     text = response.text
 
 
@@ -49,10 +49,13 @@ def get_nogizaka_latest():
 
 
     if not match:
+
         print(
             "乃木坂API解析失敗"
         )
+
         return None
+
 
 
     data = json.loads(
@@ -61,13 +64,15 @@ def get_nogizaka_latest():
 
 
     if not data.get("data"):
+
         return None
+
 
 
     blog = data["data"][0]
 
 
-    return {
+    result = {
         "group": "乃木坂46",
         "url": blog.get("link", ""),
         "member": blog.get("name", ""),
@@ -77,10 +82,23 @@ def get_nogizaka_latest():
     }
 
 
+    print(
+        "乃木坂取得:",
+        result
+    )
+
+
+    return result
+
+
+
+
 
 def get_sakurazaka_latest():
 
     return None
+
+
 
 
 
@@ -90,23 +108,42 @@ def get_hinatazaka_latest():
 
 
 
+
+
 def get_latest_blog():
 
     results = []
 
-    blogs = [
-        get_nogizaka_latest(),
-        get_sakurazaka_latest(),
-        get_hinatazaka_latest()
-    ]
+
+    for func in [
+        get_nogizaka_latest,
+        get_sakurazaka_latest,
+        get_hinatazaka_latest
+    ]:
+
+        blog = func()
 
 
-    for blog in blogs:
+        if isinstance(blog, dict):
 
-        if blog:
             results.append(blog)
 
 
-    print("取得ブログ:", results)
+        else:
+
+            if blog is not None:
+                print(
+                    "想定外データ:",
+                    blog,
+                    type(blog)
+                )
+
+
+
+    print(
+        "最終取得:",
+        results
+    )
+
 
     return results
