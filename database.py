@@ -8,12 +8,12 @@ DB_NAME = "/app/data/blogs.db"
 
 def init_db():
 
-    conn = sqlite3.connect(
-        DB_NAME
-    )
+    print("DB PATH:", DB_NAME)
+    print("DB EXISTS:", os.path.exists(DB_NAME))
+
+    conn = sqlite3.connect(DB_NAME)
 
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -25,7 +25,6 @@ def init_db():
         )
         """
     )
-
 
     conn.commit()
     conn.close()
