@@ -302,7 +302,6 @@ def get_hinatazaka_latest():
         "/s/official/diary/member/list?ima=0000"
     )
 
-
     try:
 
         response = requests.get(
@@ -311,9 +310,7 @@ def get_hinatazaka_latest():
             timeout=10
         )
 
-
         response.raise_for_status()
-
 
 
         print(
@@ -324,109 +321,152 @@ def get_hinatazaka_latest():
 
         soup = BeautifulSoup(
             response.text,
-            "html.parser"
+            "lxml"
         )
 
 
         blogs = []
 
 
-        items = soup.select(
-            "li.p-blog-top__item"
+        # ブログ詳細URLを探す
+        links = soup.find_all(
+            "a",
+            href=re.compile(
+                r"/s/official/diary/detail/"
+            )
         )
 
 
         print(
-            "日向坂記事数:",
-            len(items)
+            "日向坂リンク数:",
+            len(links)
         )
 
 
+        if not links:
+            return []
 
-        for item in items:
 
 
-            link = item.find(
-                "a"
+        # 最新1件のみ
+        link = links[0]
+
+
+        blog_url = urljoin(
+            list_url,
+            link["href"]
+        )
+
+
+        detail = requests.get(
+            blog_url,
+            headers=HEADERS,
+            timeout=10
+        )
+
+        detail.raise_for_status()
+
+
+        detail_soup = BeautifulSoup(
+            detail.text,
+            "lxml"
+        )
+
+
+        # 本文
+        body = detail_soup.select_one(
+            ".p-blog-detail__text"
+        )
+
+
+        if not body:
+
+            body = detail_soup.select_one(
+                "article"
             )
 
 
-            if not link:
-                continue
+        # メンバー名
+        member = ""
 
 
-            href = link.get(
-                "href"
-            )
+        member_tag = detail_soup.select_one(
+            ".p-blog-detail__name"
+        )
 
 
-            if not href:
-                continue
+        if member_tag:
 
-
-
-            blog_url = urljoin(
-                list_url,
-                href
+            member = member_tag.get_text(
+                strip=True
             )
 
 
 
-            member = item.select_one(
-                ".c-blog-top__name"
+        # タイトル
+        title = ""
+
+
+        title_tag = detail_soup.select_one(
+            "h1"
+        )
+
+
+        if title_tag:
+
+            title = title_tag.get_text(
+                " ",
+                strip=True
             )
 
 
-            title = item.select_one(
-                ".c-blog-top__title"
+
+        # 日付
+        date = ""
+
+
+        date_tag = detail_soup.select_one(
+            "time"
+        )
+
+
+        if date_tag:
+
+            date = normalize_datetime(
+                date_tag.get_text(
+                    strip=True
+                )
             )
 
 
-            date = item.select_one(
-                ".c-blog-top__date"
+
+        result = {
+
+            "group": "日向坂46",
+
+            "url": blog_url,
+
+            "member": member,
+
+            "title": title,
+
+            "date": date,
+
+            "text": (
+                str(body)
+                if body else ""
             )
 
-
-
-            blogs.append(
-                {
-                    "group": "日向坂46",
-
-                    "url": blog_url,
-
-                    "member":
-                        member.get_text(
-                            strip=True
-                        )
-                        if member else "",
-
-
-                    "title":
-                        title.get_text(
-                            strip=True
-                        )
-                        if title else "",
-
-
-                    "date":
-                        normalize_datetime(
-                            date.get_text(
-                                strip=True
-                            )
-                        )
-                        if date else ""
-                }
-            )
-
+        }
 
 
         print(
             "日向坂取得:",
-            blogs[:1]
+            result
         )
 
 
-        return blogs
+        return [result]
 
 
 
@@ -438,7 +478,6 @@ def get_hinatazaka_latest():
         )
 
         return []
-
 
 
 
