@@ -5,7 +5,8 @@ import re
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-from parsers.hinatazaka import get_hinatazaka_latest
+from parsers.utils import normalize_datetime
+
 
 HEADERS = {
     "User-Agent": (
@@ -13,11 +14,8 @@ HEADERS = {
         "(Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 "
         "Chrome/120 Safari/537.36"
-    ),
-    "Referer": "https://www.nogizaka46.com/"
+    )
 }
-
-
 
 
 
@@ -31,6 +29,7 @@ def get_nogizaka_latest():
         "https://www.nogizaka46.com"
         "/s/n46/api/list/blog"
     )
+
 
     try:
 
@@ -57,11 +56,6 @@ def get_nogizaka_latest():
 
 
         if not match:
-
-            print(
-                "乃木坂API解析失敗"
-            )
-
             return None
 
 
@@ -71,15 +65,18 @@ def get_nogizaka_latest():
         )
 
 
+        blogs = data.get(
+            "data",
+            []
+        )
 
-        if not data.get("data"):
 
+        if not blogs:
             return None
 
 
 
-        blog = data["data"][0]
-
+        blog = blogs[0]
 
 
         result = {
@@ -101,9 +98,11 @@ def get_nogizaka_latest():
                 ""
             ),
 
-            "date": blog.get(
-                "date",
-                ""
+            "date": normalize_datetime(
+                blog.get(
+                    "date",
+                    ""
+                )
             ),
 
             "text": blog.get(
@@ -112,7 +111,6 @@ def get_nogizaka_latest():
             )
 
         }
-
 
 
         print(
@@ -139,7 +137,6 @@ def get_nogizaka_latest():
 
 
 
-
 # =========================
 # 櫻坂46
 # =========================
@@ -154,18 +151,14 @@ def get_sakurazaka_latest():
 
     try:
 
-        # -----------------
-        # 一覧取得
-        # -----------------
-
         response = requests.get(
             list_url,
             headers=HEADERS,
             timeout=10
         )
 
-        response.raise_for_status()
 
+        response.raise_for_status()
 
 
         soup = BeautifulSoup(
@@ -174,29 +167,22 @@ def get_sakurazaka_latest():
         )
 
 
-
-        article = soup.select_one(
-            "ul.com-blog-part li.box"
+        item = soup.select_one(
+            "li"
         )
 
 
-        if not article:
-
-            print(
-                "櫻坂ブログ取得失敗"
-            )
-
+        if not item:
             return None
 
 
 
-        link = article.select_one(
+        link = item.select_one(
             "a[href]"
         )
 
 
         if not link:
-
             return None
 
 
@@ -208,81 +194,42 @@ def get_sakurazaka_latest():
 
 
 
-        member = article.select_one(
-            ".name"
-        )
-
-
-        title = article.select_one(
-            ".title"
-        )
-
-
-
-        # -----------------
-        # 詳細取得
-        # -----------------
-
-        detail_response = requests.get(
+        detail = requests.get(
             blog_url,
             headers=HEADERS,
             timeout=10
         )
 
 
-        detail_response.raise_for_status()
+        detail.raise_for_status()
 
 
 
         detail_soup = BeautifulSoup(
-            detail_response.text,
+            detail.text,
             "lxml"
         )
 
 
-
-        # -----------------
-        # 日付取得
-        # -----------------
-
-        date = ""
-
-
-        date_tag = detail_soup.select_one(
-            ".blog-foot .date"
+        member = detail_soup.select_one(
+            ".name"
         )
 
 
-        if date_tag:
-
-            date = date_tag.get_text(
-                strip=True
-            )
+        title = detail_soup.select_one(
+            "h1"
+        )
 
 
-
-        print(
-            "櫻坂詳細日付:",
-            date
+        date = detail_soup.select_one(
+            ".date"
         )
 
 
 
-        # -----------------
-        # 本文取得
-        # -----------------
-
-        text = ""
-
-
-        article_body = detail_soup.select_one(
+        article = detail_soup.select_one(
             ".box-article"
         )
-
-
-        if article_body:
-
-            text = str(article_body)
 
 
 
@@ -292,31 +239,29 @@ def get_sakurazaka_latest():
 
             "url": blog_url,
 
-
             "member": (
-                member.get_text(
-                    strip=True
-                )
+                member.get_text(strip=True)
                 if member else ""
             ),
 
-
             "title": (
-                title.get_text(
-                    " ",
-                    strip=True
-                )
+                title.get_text(strip=True)
                 if title else ""
             ),
 
+            "date": (
+                normalize_datetime(
+                    date.get_text(strip=True)
+                )
+                if date else ""
+            ),
 
-            "date": date,
-
-
-            "text": text
+            "text": (
+                str(article)
+                if article else ""
+            )
 
         }
-
 
 
         print(
@@ -343,51 +288,64 @@ def get_sakurazaka_latest():
 
 
 
-
 # =========================
 # 日向坂46
 # =========================
 
 def get_hinatazaka_latest():
 
-    url = "https://www.hinatazaka46.com/s/official/diary/member/list?ima=0000"
-
-    response = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=10
-    )
-
-    response.raise_for_status()
-
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
+    list_url = (
+        "https://www.hinatazaka46.com"
+        "/s/official/diary/member/list?ima=0000"
     )
 
 
-    blogs = []
+    try:
+
+        response = requests.get(
+            list_url,
+            headers=HEADERS,
+            timeout=10
+        )
 
 
-    for item in soup.select(
-        "li.p-blog-top__item"
-    ):
+        response.raise_for_status()
 
-        link = item.find("a")
+
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
+
+
+
+        item = soup.select_one(
+            "li.p-blog-top__item"
+        )
+
+
+        if not item:
+            print(
+                "日向坂カード取得失敗"
+            )
+            return None
+
+
+
+        link = item.find(
+            "a"
+        )
+
 
         if not link:
-            continue
+            return None
 
 
-        href = link.get("href")
 
-        if not href:
-            continue
-
-
-        url = urljoin(
-            url,
-            href
+        blog_url = urljoin(
+            list_url,
+            link["href"]
         )
 
 
@@ -395,29 +353,64 @@ def get_hinatazaka_latest():
             ".c-blog-top__name"
         )
 
+
         title = item.select_one(
             ".c-blog-top__title"
         )
+
 
         date = item.select_one(
             ".c-blog-top__date"
         )
 
 
-        blogs.append(
-            {
-                "group": "日向坂46",
-                "url": url,
-                "member": member.get_text(strip=True) if member else "",
-                "title": title.get_text(strip=True) if title else "",
-                "date": normalize_datetime(
+
+        result = {
+
+            "group": "日向坂46",
+
+            "url": blog_url,
+
+            "member": (
+                member.get_text(strip=True)
+                if member else ""
+            ),
+
+            "title": (
+                title.get_text(strip=True)
+                if title else ""
+            ),
+
+            "date": (
+                normalize_datetime(
                     date.get_text(strip=True)
-                ) if date else ""
-            }
+                )
+                if date else ""
+            ),
+
+            "text": ""
+
+        }
+
+
+        print(
+            "日向坂取得:",
+            result
         )
 
 
-    return blogs
+        return result
+
+
+
+    except Exception as e:
+
+        print(
+            "日向坂取得エラー:",
+            e
+        )
+
+        return None
 
 
 
@@ -433,34 +426,21 @@ def get_latest_blog():
     results = []
 
 
-    funcs = [
-
+    for func in [
         get_nogizaka_latest,
-
         get_sakurazaka_latest,
-
         get_hinatazaka_latest
-
-    ]
-
-
-
-    for func in funcs:
+    ]:
 
 
         blog = func()
 
 
-
-        if isinstance(
-            blog,
-            dict
-        ):
+        if blog:
 
             results.append(
                 blog
             )
-
 
 
     print(
