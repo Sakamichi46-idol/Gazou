@@ -272,267 +272,154 @@ def get_sakurazaka_latest():
 # 日向坂46
 # =========================
 
-def get_hinatazaka_latest():
+def get_hinata_latest():
+    import requests
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
 
-    list_url = (
-        "https://www.hinatazaka46.com"
-        "/s/official/diary/member/list?ima=0000"
+    url = "https://www.hinatazaka46.com/s/official/diary/member/list?ima=0000"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=10
+    )
+
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "lxml"
+    )
+
+    # 最新ブログURL取得
+    links = []
+
+    for a in soup.select("a"):
+        href = a.get("href")
+
+        if href and "/diary/detail/" in href:
+            full_url = urljoin(
+                url,
+                href
+            )
+
+            if full_url not in links:
+                links.append(full_url)
+
+    if not links:
+        print("日向坂ブログURL取得失敗")
+        return None
+
+    latest_url = links[0]
+
+    print("日向坂URL:", latest_url)
+
+    # 記事ページ取得
+    article_response = requests.get(
+        latest_url,
+        headers=headers,
+        timeout=10
+    )
+
+    article_response.raise_for_status()
+
+    article_soup = BeautifulSoup(
+        article_response.text,
+        "lxml"
+    )
+
+    print(
+        "日向坂本文:",
+        ".p-blog-article"
+        if article_soup.select_one(".p-blog-article")
+        else "なし"
     )
 
 
-    try:
+    # タイトル
+    title_tag = article_soup.select_one(
+        ".c-blog-article__title"
+    )
 
-        response = requests.get(
-            list_url,
-            headers=HEADERS,
-            timeout=10
-        )
-
-        response.raise_for_status()
-
-
-        soup = BeautifulSoup(
-            response.text,
-            "lxml"
-        )
+    title = (
+        title_tag.get_text(strip=True)
+        if title_tag
+        else ""
+    )
 
 
-        links = soup.find_all(
-            "a",
-            href=re.compile(
-                r"/s/official/diary/detail/"
-            )
-        )
+    # メンバー
+    member_tag = article_soup.select_one(
+        ".c-blog-article__name a"
+    )
+
+    member = (
+        member_tag.get_text(strip=True)
+        if member_tag
+        else ""
+    )
 
 
-        print(
-            "日向坂リンク数:",
-            len(links)
-        )
+    # 日付
+    date_tag = article_soup.select_one(
+        ".c-blog-article__date time"
+    )
 
+    date = ""
 
-        if not links:
-            return []
+    if date_tag:
+        date_text = date_tag.text.strip()
 
+        # 2026.7.10 17:56 → 2026年07月10日 17:56
+        try:
+            date_part, time_part = date_text.split()
 
-        blog_url = urljoin(
-            list_url,
-            links[0]["href"]
-        )
+            y, m, d = date_part.split(".")
 
-
-        print(
-            "日向坂URL:",
-            blog_url
-        )
-
-
-        detail = requests.get(
-            blog_url,
-            headers=HEADERS,
-            timeout=10
-        )
-
-        detail.raise_for_status()
-
-
-        detail_soup = BeautifulSoup(
-            detail.text,
-            "lxml"
-        )
-
-
-        # =====================
-        # 本文
-        # =====================
-
-        body = None
-
-
-        body_selectors = [
-
-            ".p-blog-article",
-
-            ".p-blog-detail",
-
-            ".c-blog-detail",
-
-            "article"
-
-        ]
-
-
-        for selector in body_selectors:
-
-            body = detail_soup.select_one(
-                selector
+            date = (
+                f"{y}年"
+                f"{int(m):02d}月"
+                f"{int(d):02d}日 "
+                f"{time_part}"
             )
 
-            if body:
-                print(
-                    "日向坂本文:",
-                    selector
-                )
-                break
+        except Exception:
+            date = date_text
 
 
+    # 本文
+    body = article_soup.select_one(
+        ".c-blog-article__text"
+    )
 
-        # =====================
-        # メンバー
-        # =====================
+    text = (
+        str(body)
+        if body
+        else ""
+    )
 
-        member = ""
 
+    data = {
+        "group": "日向坂46",
+        "url": latest_url,
+        "member": member,
+        "title": title,
+        "date": date,
+        "text": text
+    }
 
-        member_selectors = [
 
-            ".p-blog-detail__profile-name",
+    print(
+        "日向坂取得:",
+        data
+    )
 
-            ".p-blog-detail__name",
-
-            ".profile-name",
-
-            ".name"
-
-        ]
-
-
-        for selector in member_selectors:
-
-            tag = detail_soup.select_one(
-                selector
-            )
-
-            if tag:
-
-                member = tag.get_text(
-                    strip=True
-                )
-
-                break
-
-
-
-        # OFFICIAL BLOG除外
-
-        if (
-            not member
-            or "OFFICIAL" in member
-        ):
-
-            member = ""
-
-
-
-        # =====================
-        # タイトル
-        # =====================
-
-        title = ""
-
-
-        title_selectors = [
-
-            ".p-blog-detail__title",
-
-            ".p-blog-detail__head h1",
-
-            "h1"
-
-        ]
-
-
-        for selector in title_selectors:
-
-            tag = detail_soup.select_one(
-                selector
-            )
-
-            if tag:
-
-                title = tag.get_text(
-                    " ",
-                    strip=True
-                )
-
-                break
-
-
-
-        # =====================
-        # 日付
-        # =====================
-
-        date = ""
-
-
-        date_selectors = [
-
-            "time",
-
-            ".date",
-
-            ".p-blog-detail__date"
-
-        ]
-
-
-        for selector in date_selectors:
-
-            tag = detail_soup.select_one(
-                selector
-            )
-
-            if tag:
-
-                date = normalize_datetime(
-                    tag.get_text(
-                        strip=True
-                    )
-                )
-
-                break
-
-
-
-        result = {
-
-            "group": "日向坂46",
-
-            "url": blog_url,
-
-            "member": member,
-
-            "title": title,
-
-            "date": date,
-
-            "text":
-                str(body)
-                if body
-                else ""
-
-        }
-
-
-        print(
-            "日向坂取得:",
-            result
-        )
-
-
-        return [result]
-
-
-
-    except Exception as e:
-
-        print(
-            "日向坂取得エラー:",
-            e
-        )
-
-        return []
+    return data
 
 
 # =========================
