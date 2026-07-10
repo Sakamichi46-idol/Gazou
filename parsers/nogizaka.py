@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+
 from parsers.utils import normalize_datetime
 
 
@@ -9,7 +10,11 @@ HEADERS = {
 }
 
 
+BASE_URL = "https://www.nogizaka46.com"
+
+
 def get_nogizaka_images(url):
+
     response = requests.get(
         url,
         headers=HEADERS,
@@ -18,10 +23,12 @@ def get_nogizaka_images(url):
 
     response.raise_for_status()
 
+
     soup = BeautifulSoup(
         response.text,
         "html.parser"
     )
+
 
     blog = {
         "group": "乃木坂46",
@@ -31,28 +38,43 @@ def get_nogizaka_images(url):
         "images": []
     }
 
+
+    # ----------------
     # タイトル
+    # ----------------
+
     title = soup.find("h1")
 
     if title:
-        blog["title"] = title.get_text(strip=True)
+        blog["title"] = title.get_text(
+            strip=True
+        )
 
 
+    # ----------------
     # メンバー名
+    # ----------------
+
     member = soup.find(
         class_="bd--prof__name"
     )
 
     if member:
-        blog["member"] = member.get_text(strip=True)
+        blog["member"] = member.get_text(
+            strip=True
+        )
 
 
+    # ----------------
     # 投稿日
+    # ----------------
+
     date = soup.find(
         class_="bd--hd__date"
     )
 
     if date:
+
         blog["date"] = normalize_datetime(
             date.get_text(
                 " ",
@@ -61,20 +83,33 @@ def get_nogizaka_images(url):
         )
 
 
-    # 本文部分
+    # ----------------
+    # 本文取得
+    # ----------------
+
     article = (
         soup.find(
             "div",
             class_="bd--edit"
         )
+        or soup.find(
+            "div",
+            class_="bd--edit__body"
+        )
         or soup.find("article")
         or soup.find("main")
+        or soup.find("p")
     )
 
 
     if article is None:
         article = soup
 
+
+
+    # ----------------
+    # 画像取得
+    # ----------------
 
     seen = set()
 
@@ -83,29 +118,32 @@ def get_nogizaka_images(url):
 
         src = img.get("src")
 
+
         if not src:
             continue
 
 
-        src = urljoin(
-            url,
+        image_url = urljoin(
+            BASE_URL,
             src
         )
 
 
         # 乃木坂ブログ画像のみ
-        if "/files/46/diary/" not in src:
+        if "/files/46/diary/" not in image_url:
             continue
 
 
-        # 重複削除
-        if src in seen:
+        # 重複防止
+        if image_url in seen:
             continue
 
 
-        seen.add(src)
+        seen.add(image_url)
 
-        blog["images"].append(src)
+        blog["images"].append(
+            image_url
+        )
 
 
     return blog
