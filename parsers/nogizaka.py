@@ -32,6 +32,7 @@ def get_nogizaka_images(url):
 
     blog = {
         "group": "乃木坂46",
+        "url": url,
         "member": "",
         "title": "",
         "date": "",
@@ -39,10 +40,7 @@ def get_nogizaka_images(url):
     }
 
 
-    # ----------------
     # タイトル
-    # ----------------
-
     title = soup.find("h1")
 
     if title:
@@ -51,10 +49,7 @@ def get_nogizaka_images(url):
         )
 
 
-    # ----------------
-    # メンバー名
-    # ----------------
-
+    # メンバー
     member = soup.find(
         class_="bd--prof__name"
     )
@@ -65,16 +60,12 @@ def get_nogizaka_images(url):
         )
 
 
-    # ----------------
-    # 投稿日
-    # ----------------
-
+    # 日付
     date = soup.find(
         class_="bd--hd__date"
     )
 
     if date:
-
         blog["date"] = normalize_datetime(
             date.get_text(
                 " ",
@@ -83,10 +74,7 @@ def get_nogizaka_images(url):
         )
 
 
-    # ----------------
-    # 本文取得
-    # ----------------
-
+    # 本文
     article = (
         soup.find(
             "div",
@@ -106,11 +94,7 @@ def get_nogizaka_images(url):
         article = soup
 
 
-
-    # ----------------
-    # 画像取得
-    # ----------------
-
+    # 画像
     seen = set()
 
 
@@ -129,12 +113,11 @@ def get_nogizaka_images(url):
         )
 
 
-        # 乃木坂ブログ画像のみ
+        # 乃木坂ブログ画像だけ
         if "/files/46/diary/" not in image_url:
             continue
 
 
-        # 重複防止
         if image_url in seen:
             continue
 
