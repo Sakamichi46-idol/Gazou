@@ -1,4 +1,5 @@
 import requests
+
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
@@ -6,38 +7,17 @@ from parsers.utils import normalize_datetime
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/120 Safari/537.36"
+    )
 }
 
 
 def get_hinatazaka_images(url):
-
-    try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=10
-        )
-
-        response.raise_for_status()
-
-    except Exception as e:
-        print("日向坂取得エラー:", e)
-        return {
-            "group": "日向坂46",
-            "member": "",
-            "title": "",
-            "date": "",
-            "url": url,
-            "images": []
-        }
-
-
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
-    )
-
 
     blog = {
         "group": "日向坂46",
@@ -49,38 +29,99 @@ def get_hinatazaka_images(url):
     }
 
 
-    # タイトル
-    title = soup.find(
-        "h1"
+    try:
+
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+
+    except Exception as e:
+
+        print(
+            "日向坂取得エラー:",
+            e
+        )
+
+        return blog
+
+
+
+    soup = BeautifulSoup(
+        response.text,
+        "lxml"
     )
 
+
+    # =====================
+    # タイトル
+    # =====================
+
+    title = soup.select_one(
+        ".c-blog-article__title"
+    )
+
+
+    if not title:
+
+        title = soup.find(
+            "h1"
+        )
+
+
     if title:
+
         blog["title"] = title.get_text(
+            " ",
             strip=True
         )
 
 
-    # メンバー名
+
+    # =====================
+    # メンバー
+    # =====================
+
     member = soup.select_one(
-        ".p-blog-article__name"
+        ".c-blog-article__name"
     )
 
+
     if not member:
+
         member = soup.select_one(
-            ".c-blog-article__name"
+            ".p-blog-article__name"
         )
 
 
     if member:
+
         blog["member"] = member.get_text(
+            " ",
             strip=True
         )
 
 
-    # 投稿日
-    date = soup.find(
-        "time"
+
+    # =====================
+    # 日付
+    # =====================
+
+    date = soup.select_one(
+        ".c-blog-article__date time"
     )
+
+
+    if not date:
+
+        date = soup.find(
+            "time"
+        )
+
 
     if date:
 
@@ -92,66 +133,111 @@ def get_hinatazaka_images(url):
             )
         )
 
+
         blog["date"] = normalize_datetime(
             date_text
         )
 
 
 
-    # 本文部分
+    # =====================
+    # 本文
+    # =====================
+
     article = soup.select_one(
         ".c-blog-article__text"
     )
 
 
     if not article:
+
+        article = soup.select_one(
+            ".p-blog-article__text"
+        )
+
+
+    if not article:
+
         article = soup
 
+
+
+    # =====================
+    # 画像取得
+    # =====================
 
     seen = set()
 
 
-    # 画像取得
     for img in article.find_all("img"):
 
-        src = img.get("src")
+
+        src = (
+            img.get("src")
+            or img.get("data-src")
+            or img.get("data-original")
+        )
 
 
         if not src:
             continue
 
 
-        img_url = urljoin(
+
+        image_url = urljoin(
             url,
             src
         )
 
 
-        # 日向坂ブログ画像のみ
-        if "/files/14/diary/official/member/" not in img_url:
+
+        # 画像判定
+        if (
+            "/files/" not in image_url
+            and
+            "hinatazaka46" not in image_url
+        ):
             continue
 
 
-        # ロゴ除外
-        if "logo" in img_url.lower():
+
+        # 不要画像除外
+
+        lower = image_url.lower()
+
+
+        if any(
+            x in lower
+            for x in [
+                "logo",
+                "icon",
+                "header",
+                "footer"
+            ]
+        ):
             continue
 
 
-        # 重複削除
-        if img_url in seen:
+
+        if image_url in seen:
             continue
 
 
-        seen.add(img_url)
 
-
-        blog["images"].append(
-            img_url
+        seen.add(
+            image_url
         )
 
 
+        blog["images"].append(
+            image_url
+        )
+
+
+
     print(
-        f"日向坂画像数: {len(blog['images'])}"
+        "日向坂画像数:",
+        len(blog["images"])
     )
 
 
