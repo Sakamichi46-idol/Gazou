@@ -9,7 +9,7 @@ from discord.ext import commands
 from image_getter import get_images
 from blog_checker import get_latest_blog
 from blog_monitor import check_blog
-from database import init_db
+from database import init_db, is_notified, save_blog
 
 
 TOKEN = os.getenv("TOKEN")
@@ -33,6 +33,8 @@ url_pattern = re.compile(
 
 @bot.event
 async def on_ready():
+
+    init_db()
 
     print(
         f"{bot.user} が起動しました！"
