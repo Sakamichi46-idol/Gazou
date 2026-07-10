@@ -37,6 +37,12 @@ async def on_ready():
     )
 
 
+    bot.loop.create_task(
+        check_blog(
+            bot
+        )
+    )
+
 @bot.command()
 async def ping(ctx):
 
