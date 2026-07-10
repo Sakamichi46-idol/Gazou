@@ -282,10 +282,6 @@ def get_hinatazaka_latest():
 
     try:
 
-        # ---------------------
-        # 一覧取得
-        # ---------------------
-
         response = requests.get(
             list_url,
             headers=HEADERS,
@@ -316,42 +312,13 @@ def get_hinatazaka_latest():
 
 
         if not links:
-
-            print(
-                "日向坂リンクなし"
-            )
-
             return []
 
 
-
-        # 重複削除
-
-        urls = []
-
-        for link in links:
-
-            href = link.get(
-                "href"
-            )
-
-            if href:
-
-                url = urljoin(
-                    list_url,
-                    href
-                )
-
-                if url not in urls:
-
-                    urls.append(
-                        url
-                    )
-
-
-        # 最新記事
-
-        blog_url = urls[0]
+        blog_url = urljoin(
+            list_url,
+            links[0]["href"]
+        )
 
 
         print(
@@ -359,11 +326,6 @@ def get_hinatazaka_latest():
             blog_url
         )
 
-
-
-        # ---------------------
-        # 詳細ページ取得
-        # ---------------------
 
         detail = requests.get(
             blog_url,
@@ -380,25 +342,20 @@ def get_hinatazaka_latest():
         )
 
 
-
-        # ---------------------
+        # =====================
         # 本文
-        # ---------------------
+        # =====================
 
         body = None
 
 
         body_selectors = [
 
-            ".box-article",
-
-            ".p-blog-detail__text",
-
-            ".c-blog-detail__text",
+            ".p-blog-article",
 
             ".p-blog-detail",
 
-            ".blog-detail",
+            ".c-blog-detail",
 
             "article"
 
@@ -412,44 +369,30 @@ def get_hinatazaka_latest():
             )
 
             if body:
-
                 print(
-                    "日向坂本文取得成功:",
+                    "日向坂本文:",
                     selector
                 )
-
                 break
 
 
 
-        if not body:
-
-            print(
-                "日向坂本文取得失敗"
-            )
-
-
-
-        # ---------------------
+        # =====================
         # メンバー
-        # ---------------------
+        # =====================
 
         member = ""
 
 
         member_selectors = [
 
-            ".name",
-
-            ".member-name",
-
             ".p-blog-detail__profile-name",
+
+            ".p-blog-detail__name",
 
             ".profile-name",
 
-            "h2",
-
-            "h1"
+            ".name"
 
         ]
 
@@ -460,11 +403,9 @@ def get_hinatazaka_latest():
                 selector
             )
 
-
             if tag:
 
                 member = tag.get_text(
-                    " ",
                     strip=True
                 )
 
@@ -472,33 +413,29 @@ def get_hinatazaka_latest():
 
 
 
-        if member:
+        # OFFICIAL BLOG除外
 
-            print(
-                "日向坂メンバー:",
-                member
-            )
+        if (
+            not member
+            or "OFFICIAL" in member
+        ):
 
-        else:
-
-            print(
-                "日向坂メンバー取得失敗"
-            )
+            member = ""
 
 
 
-        # ---------------------
+        # =====================
         # タイトル
-        # ---------------------
+        # =====================
 
         title = ""
 
 
         title_selectors = [
 
-            ".title",
+            ".p-blog-detail__title",
 
-            ".ttl",
+            ".p-blog-detail__head h1",
 
             "h1"
 
@@ -511,7 +448,6 @@ def get_hinatazaka_latest():
                 selector
             )
 
-
             if tag:
 
                 title = tag.get_text(
@@ -523,9 +459,9 @@ def get_hinatazaka_latest():
 
 
 
-        # ---------------------
+        # =====================
         # 日付
-        # ---------------------
+        # =====================
 
         date = ""
 
@@ -536,7 +472,7 @@ def get_hinatazaka_latest():
 
             ".date",
 
-            ".blog-date"
+            ".p-blog-detail__date"
 
         ]
 
@@ -546,7 +482,6 @@ def get_hinatazaka_latest():
             tag = detail_soup.select_one(
                 selector
             )
-
 
             if tag:
 
@@ -559,10 +494,6 @@ def get_hinatazaka_latest():
                 break
 
 
-
-        # ---------------------
-        # 結果
-        # ---------------------
 
         result = {
 
@@ -590,9 +521,7 @@ def get_hinatazaka_latest():
         )
 
 
-        return [
-            result
-        ]
+        return [result]
 
 
 
