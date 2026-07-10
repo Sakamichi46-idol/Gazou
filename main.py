@@ -1,7 +1,6 @@
 import os
 import re
 import io
-import asyncio
 
 import aiohttp
 import discord
@@ -14,11 +13,17 @@ from blog_monitor import check_blog
 from database import init_db
 
 
-TOKEN = os.getenv("TOKEN")
+
+TOKEN = os.getenv(
+    "TOKEN"
+)
+
 
 
 intents = discord.Intents.default()
+
 intents.message_content = True
+
 
 
 bot = commands.Bot(
@@ -27,12 +32,15 @@ bot = commands.Bot(
 )
 
 
+
 url_pattern = re.compile(
     r"https?://\S+"
 )
 
 
+
 blog_task = None
+
 
 
 
@@ -50,15 +58,18 @@ async def on_ready():
     )
 
 
+
     if blog_task is None:
 
-        blog_task = asyncio.create_task(
+        blog_task = bot.loop.create_task(
             check_blog(bot)
         )
+
 
         print(
             "ブログ監視開始"
         )
+
 
 
 
@@ -71,10 +82,12 @@ async def ping(ctx):
 
 
 
+
 @bot.command()
 async def latest(ctx):
 
     blogs = get_latest_blog()
+
 
 
     if not blogs:
@@ -102,77 +115,6 @@ async def latest(ctx):
 
 
 
-async def send_image_files(channel, images, text):
-
-    async with aiohttp.ClientSession() as session:
-
-        files = []
-
-
-        for i, image_url in enumerate(
-            images,
-            start=1
-        ):
-
-            try:
-
-                async with session.get(
-                    image_url,
-                    timeout=20
-                ) as resp:
-
-
-                    if resp.status != 200:
-                        continue
-
-
-                    data = await resp.read()
-
-
-                    files.append(
-                        discord.File(
-                            io.BytesIO(data),
-                            filename=f"image{i}.jpg"
-                        )
-                    )
-
-
-            except Exception as e:
-
-                print(
-                    "画像取得エラー:",
-                    e
-                )
-
-
-
-        if not files:
-
-            await channel.send(
-                "画像を取得できませんでした。",
-                suppress_embeds=True
-            )
-
-            return
-
-
-
-        for start in range(
-            0,
-            len(files),
-            10
-        ):
-
-            await channel.send(
-                content=text,
-                files=files[start:start+10],
-                suppress_embeds=True
-            )
-
-
-            text = ""
-
-
 
 @bot.event
 async def on_message(message):
@@ -186,6 +128,7 @@ async def on_message(message):
     urls = url_pattern.findall(
         message.content
     )
+
 
 
     for url in urls:
@@ -203,6 +146,7 @@ async def on_message(message):
             )
 
 
+
             if not images:
 
                 await message.channel.send(
@@ -211,6 +155,7 @@ async def on_message(message):
                 )
 
                 continue
+
 
 
 
@@ -224,11 +169,77 @@ async def on_message(message):
             )
 
 
-            await send_image_files(
-                message.channel,
-                images,
-                text
-            )
+
+            async with aiohttp.ClientSession() as session:
+
+                files = []
+
+
+                for i, image_url in enumerate(
+                    images,
+                    start=1
+                ):
+
+                    try:
+
+                        async with session.get(
+                            image_url,
+                            timeout=15
+                        ) as resp:
+
+
+                            if resp.status != 200:
+
+                                continue
+
+
+
+                            data = await resp.read()
+
+
+                            files.append(
+                                discord.File(
+                                    io.BytesIO(data),
+                                    filename=f"image{i}.jpg"
+                                )
+                            )
+
+
+                    except Exception as e:
+
+                        print(
+                            "画像取得エラー:",
+                            e
+                        )
+
+
+
+                if not files:
+
+                    await message.channel.send(
+                        "画像を取得できませんでした。",
+                        suppress_embeds=True
+                    )
+
+                    continue
+
+
+
+                for start in range(
+                    0,
+                    len(files),
+                    10
+                ):
+
+                    await message.channel.send(
+                        content=text,
+                        files=files[start:start+10],
+                        suppress_embeds=True
+                    )
+
+
+                    text = ""
+
 
 
         except Exception as e:
@@ -237,6 +248,8 @@ async def on_message(message):
                 "画像処理エラー:",
                 e
             )
+
+
 
             await message.channel.send(
                 f"エラー: {e}",
@@ -248,6 +261,7 @@ async def on_message(message):
     await bot.process_commands(
         message
     )
+
 
 
 
