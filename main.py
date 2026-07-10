@@ -1,9 +1,11 @@
 import os
 import re
 import io
+import asyncio
 
 import aiohttp
 import discord
+
 from discord.ext import commands
 
 from image_getter import get_images
@@ -39,7 +41,9 @@ async def on_ready():
 
     global blog_task
 
+
     init_db()
+
 
     print(
         f"{bot.user} が起動しました！"
@@ -48,18 +52,12 @@ async def on_ready():
 
     if blog_task is None:
 
-        blog_task = bot.loop.create_task(
+        blog_task = asyncio.create_task(
             check_blog(bot)
         )
 
         print(
             "ブログ監視開始"
-        )
-
-    else:
-
-        print(
-            "ブログ監視は既に起動済み"
         )
 
 
@@ -91,19 +89,88 @@ async def latest(ctx):
 
     for blog in blogs:
 
-        text = (
-            f"🏷️ {blog.get('group','')}\n"
-            f"👤 {blog.get('member','')}\n"
-            f"📝 {blog.get('title','')}\n"
-            f"📅 {blog.get('date','')}\n"
-            f"🔗 {blog.get('url','')}"
-        )
-
-
         await ctx.send(
-            text,
+            (
+                f"🏷️ {blog.get('group','')}\n"
+                f"👤 {blog.get('member','')}\n"
+                f"📝 {blog.get('title','')}\n"
+                f"📅 {blog.get('date','')}\n"
+                f"🔗 {blog.get('url','')}"
+            ),
             suppress_embeds=True
         )
+
+
+
+async def send_image_files(channel, images, text):
+
+    async with aiohttp.ClientSession() as session:
+
+        files = []
+
+
+        for i, image_url in enumerate(
+            images,
+            start=1
+        ):
+
+            try:
+
+                async with session.get(
+                    image_url,
+                    timeout=20
+                ) as resp:
+
+
+                    if resp.status != 200:
+                        continue
+
+
+                    data = await resp.read()
+
+
+                    files.append(
+                        discord.File(
+                            io.BytesIO(data),
+                            filename=f"image{i}.jpg"
+                        )
+                    )
+
+
+            except Exception as e:
+
+                print(
+                    "画像取得エラー:",
+                    e
+                )
+
+
+
+        if not files:
+
+            await channel.send(
+                "画像を取得できませんでした。",
+                suppress_embeds=True
+            )
+
+            return
+
+
+
+        for start in range(
+            0,
+            len(files),
+            10
+        ):
+
+            await channel.send(
+                content=text,
+                files=files[start:start+10],
+                suppress_embeds=True
+            )
+
+
+            text = ""
 
 
 
@@ -147,125 +214,21 @@ async def on_message(message):
 
 
 
-            # 通知文作成
-
-            text = ""
-
-
-            if blog.get("group"):
-
-                text += (
-                    f"🏷️ {blog['group']}\n"
-                )
-
-
-            if blog.get("member"):
-
-                text += (
-                    f"👤 {blog['member']}\n"
-                )
-
-
-            if blog.get("title"):
-
-                text += (
-                    f"📝 {blog['title']}\n"
-                )
-
-
-            if blog.get("date"):
-
-                text += (
-                    f"📅 {blog['date']}\n"
-                )
-
-
-            if blog.get("url"):
-
-                text += (
-                    f"🔗 {blog['url']}\n"
-                )
-
-
-            text += (
-                f"\n📷 ブログ画像 "
-                f"({len(images)}枚)"
+            text = (
+                f"🏷️ {blog.get('group','')}\n"
+                f"👤 {blog.get('member','')}\n"
+                f"📝 {blog.get('title','')}\n"
+                f"📅 {blog.get('date','')}\n"
+                f"🔗 {blog.get('url','')}\n\n"
+                f"📷 ブログ画像 ({len(images)}枚)"
             )
 
 
-
-            async with aiohttp.ClientSession() as session:
-
-                files = []
-
-
-                for i, image_url in enumerate(
-                    images,
-                    start=1
-                ):
-
-                    try:
-
-                        async with session.get(
-                            image_url
-                        ) as resp:
-
-
-                            if resp.status != 200:
-
-                                continue
-
-
-
-                            data = await resp.read()
-
-
-                            files.append(
-                                discord.File(
-                                    io.BytesIO(data),
-                                    filename=f"image{i}.jpg"
-                                )
-                            )
-
-
-                    except Exception as e:
-
-                        print(
-                            f"画像取得エラー: {e}"
-                        )
-
-
-
-                if not files:
-
-                    await message.channel.send(
-                        "画像を取得できませんでした。",
-                        suppress_embeds=True
-                    )
-
-                    continue
-
-
-
-                # Discordの添付上限10枚対策
-
-                for start in range(
-                    0,
-                    len(files),
-                    10
-                ):
-
-                    await message.channel.send(
-                        content=text,
-                        files=files[start:start+10],
-                        suppress_embeds=True
-                    )
-
-
-                    # 2回目以降は文章を送らない
-
-                    text = ""
-
+            await send_image_files(
+                message.channel,
+                images,
+                text
+            )
 
 
         except Exception as e:
@@ -274,7 +237,6 @@ async def on_message(message):
                 "画像処理エラー:",
                 e
             )
-
 
             await message.channel.send(
                 f"エラー: {e}",
