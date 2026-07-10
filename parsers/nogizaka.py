@@ -6,8 +6,15 @@ from parsers.utils import normalize_datetime
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/120 Safari/537.36"
+    )
 }
+
 
 
 def get_nogizaka_images(url):
@@ -23,46 +30,72 @@ def get_nogizaka_images(url):
 
     soup = BeautifulSoup(
         response.text,
-        "html.parser"
+        "lxml"
     )
 
 
     blog = {
+
         "group": "乃木坂46",
+
         "member": "",
+
         "title": "",
+
         "date": "",
+
         "url": url,
+
         "images": []
+
     }
 
 
-    # タイトル取得
-    title = soup.find("h1")
+
+    # =========================
+    # タイトル
+    # =========================
+
+    title = soup.select_one(
+        "h1"
+    )
 
     if title:
+
         blog["title"] = title.get_text(
+            " ",
             strip=True
         )
 
 
-    # メンバー名取得
-    member = soup.find(
-        class_="bd--prof__name"
+
+    # =========================
+    # メンバー名
+    # =========================
+
+    member = soup.select_one(
+        ".bd--prof__name"
     )
 
     if member:
+
         blog["member"] = member.get_text(
+            " ",
             strip=True
         )
 
 
-    # 投稿日取得
-    date = soup.find(
-        class_="bd--hd__date"
+
+    # =========================
+    # 投稿日
+    # =========================
+
+    date = soup.select_one(
+        ".bd--hd__date"
     )
 
     if date:
+
         blog["date"] = normalize_datetime(
             date.get_text(
                 " ",
@@ -71,37 +104,64 @@ def get_nogizaka_images(url):
         )
 
 
-    # 本文エリア取得
+
+    # =========================
+    # 本文取得
+    # =========================
+
     article = (
-        soup.find(
-            "div",
-            class_="bd--edit"
+
+        soup.select_one(
+            ".bd--edit"
         )
+
+        or soup.select_one(
+            ".bd--article"
+        )
+
+        or soup.select_one(
+            ".bd--body"
+        )
+
+        or soup.select_one(
+            ".blog-body"
+        )
+
         or soup.find(
             "article"
         )
-        or soup.find(
-            "main"
-        )
+
     )
 
 
+    # 最終手段
     if article is None:
+
         article = soup
 
 
 
+    # =========================
+    # 画像取得
+    # =========================
+
     seen = set()
 
 
-    # 画像取得
-    for img in article.find_all("img"):
+    for img in article.find_all(
+        "img"
+    ):
 
-        src = img.get("src")
+
+        src = img.get(
+            "src"
+        )
 
 
         if not src:
+
             continue
+
 
 
         image_url = urljoin(
@@ -110,22 +170,39 @@ def get_nogizaka_images(url):
         )
 
 
+
         # 乃木坂ブログ画像のみ
+
         if "/files/46/diary/" not in image_url:
+
             continue
+
 
 
         # 重複削除
+
         if image_url in seen:
+
             continue
 
 
-        seen.add(image_url)
+
+        seen.add(
+            image_url
+        )
 
 
         blog["images"].append(
             image_url
         )
+
+
+
+    print(
+        "乃木坂画像取得:",
+        len(blog["images"]),
+        "枚"
+    )
 
 
     return blog
