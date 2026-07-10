@@ -17,6 +17,7 @@ async def send_images(channel, images):
 
         files = []
 
+
         for i, image_url in enumerate(
             images,
             start=1
@@ -27,6 +28,7 @@ async def send_images(channel, images):
                 async with session.get(
                     image_url
                 ) as resp:
+
 
                     if resp.status != 200:
                         continue
@@ -51,7 +53,9 @@ async def send_images(channel, images):
                 )
 
 
+
         if not files:
+
             return
 
 
@@ -86,6 +90,7 @@ async def check_blog(bot):
             if not blogs:
 
                 await asyncio.sleep(600)
+
                 continue
 
 
@@ -97,11 +102,6 @@ async def check_blog(bot):
                     blog,
                     dict
                 ):
-
-                    print(
-                        "不正データ:",
-                        blog
-                    )
 
                     continue
 
@@ -117,8 +117,6 @@ async def check_blog(bot):
                     continue
 
 
-
-                # DB確認
 
                 if is_notified(url):
 
@@ -168,19 +166,6 @@ async def check_blog(bot):
 
 
 
-                # ブログ情報通知
-
-                await channel.send(
-                    f"🏷️ {group}\n"
-                    f"👤 {blog.get('member','')}\n"
-                    f"📝 {blog.get('title','')}\n"
-                    f"📅 {blog.get('date','')}\n"
-                    f"🔗 {url}",
-                    suppress_embeds=True
-                )
-
-
-
                 # 画像取得
 
                 detail = get_images(
@@ -194,19 +179,33 @@ async def check_blog(bot):
                 )
 
 
+
+                # 通知文章
+
+                text = (
+                    f"🏷️ {group}\n"
+                    f"👤 {blog.get('member','')}\n"
+                    f"📝 {blog.get('title','')}\n"
+                    f"📅 {blog.get('date','')}\n"
+                    f"🔗 {url}\n\n"
+                    f"📷 ブログ画像 ({len(images)}枚)"
+                )
+
+
+
+                await channel.send(
+                    text,
+                    suppress_embeds=True
+                )
+
+
+
                 if images:
-
-                    await channel.send(
-                        f"📷 ブログ画像 "
-                        f"({len(images)}枚)"
-                    )
-
 
                     await send_images(
                         channel,
                         images
                     )
-
 
                 else:
 
@@ -217,15 +216,12 @@ async def check_blog(bot):
 
 
 
-                # DB保存
-                # 修正箇所
-
                 save_blog(
-                    blog.get("url"),
-                    blog.get("group", ""),
-                    blog.get("member", ""),
-                    blog.get("title", ""),
-                    blog.get("date", "")
+                    url,
+                    group,
+                    blog.get("member",""),
+                    blog.get("title",""),
+                    blog.get("date","")
                 )
 
 
