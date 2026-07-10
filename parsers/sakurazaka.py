@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+
 from parsers.utils import normalize_datetime
 
 
@@ -10,6 +11,7 @@ HEADERS = {
 
 
 def get_sakurazaka_images(url):
+
     response = requests.get(
         url,
         headers=HEADERS,
@@ -23,6 +25,7 @@ def get_sakurazaka_images(url):
         "html.parser"
     )
 
+
     blog = {
         "group": "櫻坂46",
         "member": "",
@@ -33,41 +36,54 @@ def get_sakurazaka_images(url):
 
 
     # タイトル
-    title = soup.find("h1")
-
-    if title:
-        blog["title"] = title.get_text(strip=True)
-
-
-    # メンバー名
-    member = soup.find(
-        "p",
-        class_="name"
+    title = soup.find(
+        "h1",
+        class_="title"
     )
 
-    if not member:
-        member = soup.find(
-            class_="bd--prof__name"
-        )
+    if not title:
+        title = soup.find("h1")
 
-    if member:
-        blog["member"] = member.get_text(
+    if title:
+        blog["title"] = title.get_text(
             strip=True
         )
 
-    # 投稿日
-    date = soup.find(
-        "p",
-        class_="date"
+
+    # メンバー名・投稿日
+    blog_foot = soup.find(
+        class_="blog-foot"
     )
 
-    if date:
-        blog["date"] = normalize_datetime(
-            date.get_text(
-                " ",
+
+    if blog_foot:
+
+        # メンバー名
+        member = blog_foot.find(
+            "p",
+            class_="name"
+        )
+
+        if member:
+            blog["member"] = member.get_text(
                 strip=True
             )
+
+
+        # 投稿日時
+        date = blog_foot.find(
+            "p",
+            class_="date"
         )
+
+        if date:
+            blog["date"] = normalize_datetime(
+                date.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
 
     # 本文
     article = (
@@ -103,7 +119,7 @@ def get_sakurazaka_images(url):
         )
 
 
-        # 櫻坂ブログ画像
+        # 櫻坂ブログ画像のみ
         if "/files/" not in src:
             continue
 
