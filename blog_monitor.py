@@ -7,9 +7,13 @@ import discord
 from blog_checker import get_latest_blog
 from image_getter import get_images
 from config import BLOG_CHANNELS
+from database import (
+    is_notified,
+    save_blog
+)
 
 
-last_urls = {}
+
 
 
 async def send_images(channel, images):
