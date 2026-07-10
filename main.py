@@ -5,9 +5,8 @@ import io
 import aiohttp
 import discord
 from discord.ext import commands
-
 from image_getter import get_images
-
+from blog_checker import get_latest_blog
 
 TOKEN = os.getenv("TOKEN")
 
@@ -154,5 +153,28 @@ async def on_message(message):
         message
     )
 
+@bot.command()
+async def latest(ctx):
+
+    blogs = get_latest_blog()
+
+    if not blogs:
+        await ctx.send(
+            "ブログ取得失敗"
+        )
+        return
+
+
+    message = ""
+
+    for blog in blogs:
+
+        message += (
+            f"🏷️ {blog['group']}\n"
+            f"🔗 {blog['url']}\n\n"
+        )
+
+
+    await ctx.send(message)
 
 bot.run(TOKEN)
