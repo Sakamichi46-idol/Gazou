@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import json
+import re
 
 
 HEADERS = {
@@ -50,10 +52,17 @@ def get_nogizaka_latest():
     response.raise_for_status()
 
 
-    data = response.json()
+    text = response.text
+
+    json_text = re.search(
+        r"res\((.*)\)",
+        text
+    ).group(1)
+
+    data = json.loads(json_text)
 
 
-    print(data)
+    print(data["data"][0])
 
 
     return None
