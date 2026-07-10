@@ -8,61 +8,69 @@ HEADERS = {
 }
 
 
-BLOG_LISTS = {
-    "乃木坂46": "https://www.nogizaka46.com/s/n46/diary/member/list",
-    "櫻坂46": "https://sakurazaka46.com/s/s46/diary/member/list",
-    "日向坂46": "https://www.hinatazaka46.com/s/official/diary/member/list"
-}
+def get_nogizaka_latest():
+
+    url = "https://www.nogizaka46.com/s/n46/diary/MEMBER"
+
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=10
+    )
+
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
 
 
-def get_latest_blog():
+    post = soup.find(
+        "a",
+        class_="m--postone__a"
+    )
 
-    results = []
-
-
-    for group, url in BLOG_LISTS.items():
-
-        try:
-            response = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=10
-            )
-
-            response.raise_for_status()
-
-            soup = BeautifulSoup(
-                response.text,
-                "html.parser"
-            )
+    if not post:
+        return None
 
 
-            link = soup.find(
-                "a",
-                href=True
-            )
+    member = post.find(
+        class_="m--postone__name"
+    )
+
+    title = post.find(
+        class_="m--postone__ttl"
+    )
+
+    date = post.find(
+        class_="m--postone__time"
+    )
 
 
-            if link:
-
-                blog_url = urljoin(
-                    url,
-                    link["href"]
-                )
-
-                results.append({
-                    "group": group,
-                    "url": blog_url
-                })
-
-
-        except Exception as e:
-
-            print(
-                group,
-                "取得エラー:",
-                e
-            )
+    return {
+        "group": "乃木坂46",
+        "url": post.get("href"),
+        "member": member.get_text(strip=True)
+            if member else "",
+        "title": title.get_text(strip=True)
+            if title else "",
+        "date": date.get_text(strip=True)
+            if date else ""
+    }
 
 
-    return results
+
+def get_sakurazaka_latest():
+
+    # ここに後で櫻坂用を書く
+
+    return None
+
+
+
+def get_hinatazaka_latest():
+
+    # ここに後で日向坂用を書く
+
+    return None
