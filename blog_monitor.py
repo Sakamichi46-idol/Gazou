@@ -53,9 +53,7 @@ async def send_images(channel, images):
                 )
 
 
-
         if not files:
-
             return
 
 
@@ -72,8 +70,6 @@ async def send_images(channel, images):
 
 
 
-
-
 async def check_blog(bot):
 
     while True:
@@ -84,29 +80,20 @@ async def check_blog(bot):
 
 
             print(
-                "取得ブログ:",
+                "監視取得:",
                 blogs
             )
 
 
-
             if not blogs:
 
-                print(
-                    "ブログ取得なし"
-                )
-
                 await asyncio.sleep(600)
-
                 continue
-
 
 
 
             for blog in blogs:
 
-
-                # 辞書チェック
 
                 if not isinstance(
                     blog,
@@ -129,30 +116,17 @@ async def check_blog(bot):
 
                 if not url:
 
-                    print(
-                        "URLなし:",
-                        blog
-                    )
-
                     continue
 
 
 
-
-                # 通知済み確認
+                # DB確認
 
                 if is_notified(
                     url
                 ):
 
-                    print(
-                        "通知済み:",
-                        url
-                    )
-
                     continue
-
-
 
 
 
@@ -167,15 +141,14 @@ async def check_blog(bot):
                 )
 
 
-
                 if not channel_id:
 
                     print(
-                        f"{group} チャンネル未設定"
+                        "チャンネルなし:",
+                        group
                     )
 
                     continue
-
 
 
 
@@ -184,27 +157,17 @@ async def check_blog(bot):
                 )
 
 
-                print(
-                    "CHANNEL:",
-                    channel
-                )
-
-
-
-                if channel is None:
+                if not channel:
 
                     print(
-                        "チャンネル取得失敗:",
-                        channel_id
+                        "チャンネル取得失敗"
                     )
 
                     continue
 
 
 
-
-
-                # ブログ情報送信
+                # ブログ情報
 
                 await channel.send(
                     f"🏷️ {group}\n"
@@ -216,24 +179,10 @@ async def check_blog(bot):
 
 
 
-
-
                 # 画像取得
-
-                print(
-                    "画像取得開始:",
-                    url
-                )
-
 
                 detail = get_images(
                     url
-                )
-
-
-                print(
-                    "画像取得結果:",
-                    detail
                 )
 
 
@@ -241,7 +190,6 @@ async def check_blog(bot):
                     "images",
                     []
                 )
-
 
 
                 if images:
@@ -258,6 +206,7 @@ async def check_blog(bot):
                     )
 
 
+
                 else:
 
                     print(
@@ -267,20 +216,12 @@ async def check_blog(bot):
 
 
 
-
-
-                # DB保存
+                # ★ここが修正点
+                # urlではなくblog全部渡す
 
                 save_blog(
                     blog
                 )
-
-
-                print(
-                    "保存完了:",
-                    url
-                )
-
 
 
 
