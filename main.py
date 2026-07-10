@@ -5,8 +5,10 @@ import io
 import aiohttp
 import discord
 from discord.ext import commands
+
 from image_getter import get_images
 from blog_checker import get_latest_blog
+
 
 TOKEN = os.getenv("TOKEN")
 
@@ -28,12 +30,18 @@ url_pattern = re.compile(
 
 @bot.event
 async def on_ready():
-    print(f"{bot.user} が起動しました！")
+
+    print(
+        f"{bot.user} が起動しました！"
+    )
 
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send("Pong!")
+
+    await ctx.send(
+        "Pong!"
+    )
 
 
 @bot.event
@@ -51,31 +59,50 @@ async def on_message(message):
     for url in urls:
 
         try:
+
             blog = get_images(url)
 
             images = blog["images"]
 
 
             if not images:
+
                 await message.channel.send(
                     "画像が見つかりませんでした。"
                 )
+
                 continue
 
 
             text = ""
 
-            if blog["group"]:
-                text += f"🏷️ {blog['group']}\n"
 
-            if blog["member"]:
-                text += f"👤 {blog['member']}\n"
+            if blog.get("group"):
 
-            if blog["title"]:
-                text += f"📝 {blog['title']}\n"
+                text += (
+                    f"🏷️ {blog['group']}\n"
+                )
 
-            if blog["date"]:
-                text += f"📅 {blog['date']}\n"
+
+            if blog.get("member"):
+
+                text += (
+                    f"👤 {blog['member']}\n"
+                )
+
+
+            if blog.get("title"):
+
+                text += (
+                    f"📝 {blog['title']}\n"
+                )
+
+
+            if blog.get("date"):
+
+                text += (
+                    f"📅 {blog['date']}\n"
+                )
 
 
             text += (
@@ -91,7 +118,8 @@ async def on_message(message):
                 10
             ):
 
-                batch = images[start:start+10]
+                batch = images[start:start + 10]
+
 
                 files = []
 
@@ -104,9 +132,11 @@ async def on_message(message):
                     ):
 
                         try:
+
                             async with session.get(
                                 image_url
                             ) as resp:
+
 
                                 if resp.status != 200:
                                     continue
@@ -124,6 +154,7 @@ async def on_message(message):
 
 
                         except Exception as e:
+
                             print(
                                 f"画像取得エラー: {e}"
                             )
@@ -136,13 +167,15 @@ async def on_message(message):
                         files=files
                     )
 
-                    # 2回目以降は情報を省略
+
                     text = ""
 
 
         except Exception as e:
 
-            print(e)
+            print(
+                e
+            )
 
             await message.channel.send(
                 f"エラー: {e}"
@@ -153,28 +186,40 @@ async def on_message(message):
         message
     )
 
+
+
 @bot.command()
 async def latest(ctx):
 
     blogs = get_latest_blog()
 
+
     if not blogs:
+
         await ctx.send(
             "ブログ取得失敗"
         )
+
         return
 
 
-    message = ""
 
     for blog in blogs:
 
-        message += (
-            f"🏷️ {blog['group']}\n"
-            f"🔗 {blog['url']}\n\n"
+
+        text = (
+            f"🏷️ {blog.get('group', '')}\n"
+            f"👤 {blog.get('member', '')}\n"
+            f"📝 {blog.get('title', '')}\n"
+            f"📅 {blog.get('date', '')}\n"
+            f"🔗 {blog.get('url', '')}"
         )
 
 
-    await ctx.send(message)
+        await ctx.send(
+            text
+        )
+
+
 
 bot.run(TOKEN)
