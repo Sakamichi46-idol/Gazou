@@ -19,7 +19,7 @@ def get_nogizaka_latest():
     )
 
     response.raise_for_status()
-
+    print(response.text[:1000])
     soup = BeautifulSoup(
         response.text,
         "html.parser"
