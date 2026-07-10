@@ -54,7 +54,24 @@ def get_nogizaka_latest():
         response.text,
         "html.parser"
     )
+    print(
+        "m--postone:",
+        len(soup.find_all(class_="m--postone"))
+    )
 
+    print(
+        "detail:",
+        len(
+            soup.find_all(
+                href=True
+            )
+        )
+    )
+    
+    print(
+        "ba--all:",
+        soup.find(class_="ba--all")
+    )
 
     post = soup.find(
         "a",
