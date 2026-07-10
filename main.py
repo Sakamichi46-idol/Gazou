@@ -9,7 +9,7 @@ from discord.ext import commands
 from image_getter import get_images
 from blog_checker import get_latest_blog
 from blog_monitor import check_blog
-from database import init_db, is_notified, save_blog
+from database import init_db
 
 
 TOKEN = os.getenv("TOKEN")
@@ -41,17 +41,8 @@ async def on_ready():
     )
 
 
-    # SQLite初期化
-
-    init_db()
-
-
-    # ブログ監視開始
-
     bot.loop.create_task(
-        check_blog(
-            bot
-        )
+        check_blog(bot)
     )
 
 
@@ -102,7 +93,6 @@ async def latest(ctx):
 async def on_message(message):
 
     if message.author.bot:
-
         return
 
 
@@ -177,7 +167,6 @@ async def on_message(message):
 
             async with aiohttp.ClientSession() as session:
 
-
                 files = []
 
 
@@ -194,7 +183,6 @@ async def on_message(message):
 
 
                             if resp.status != 200:
-
                                 continue
 
 
@@ -235,3 +223,20 @@ async def on_message(message):
 
 
         except Exception as e:
+
+            print(
+                f"画像処理エラー: {e}"
+            )
+
+            await message.channel.send(
+                f"エラー: {e}"
+            )
+
+
+    await bot.process_commands(
+        message
+    )
+
+
+
+bot.run(TOKEN)
