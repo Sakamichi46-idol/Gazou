@@ -122,9 +122,12 @@ async def check_blog(bot):
 
                 # DB確認
 
-                if is_notified(
-                    url
-                ):
+                if is_notified(url):
+
+                    print(
+                        "通知済み:",
+                        url
+                    )
 
                     continue
 
