@@ -1,8 +1,25 @@
 import sqlite3
 import os
+from urllib.parse import urlparse
 
 
 DB_NAME = "/app/data/blogs.db"
+
+
+
+def normalize_url(url):
+
+    if not url:
+        return ""
+
+    parsed = urlparse(url)
+
+    return (
+        parsed.scheme
+        + "://"
+        + parsed.netloc
+        + parsed.path
+    )
 
 
 
@@ -15,6 +32,7 @@ def init_db():
 
     cur = conn.cursor()
 
+
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS blogs (
@@ -26,12 +44,16 @@ def init_db():
         """
     )
 
+
     conn.commit()
     conn.close()
 
 
 
 def is_notified(url):
+
+    url = normalize_url(url)
+
 
     conn = sqlite3.connect(
         DB_NAME
@@ -46,7 +68,9 @@ def is_notified(url):
         FROM blogs
         WHERE url = ?
         """,
-        (url,)
+        (
+            url,
+        )
     )
 
 
@@ -62,19 +86,21 @@ def is_notified(url):
 
 def save_blog(blog):
 
-    print(
-
-        "DB保存開始:",
-
+    url = normalize_url(
         blog.get("url")
-
     )
+
+
+    print(
+        "DB保存開始:",
+        url
+    )
+
 
     conn = sqlite3.connect(
-
         DB_NAME
-
     )
+
 
     cur = conn.cursor()
 
@@ -92,7 +118,7 @@ def save_blog(blog):
         (?, ?, ?, ?)
         """,
         (
-            blog.get("url"),
+            url,
             blog.get("group"),
             blog.get("title"),
             blog.get("date")
@@ -101,4 +127,5 @@ def save_blog(blog):
 
 
     conn.commit()
+
     conn.close()
