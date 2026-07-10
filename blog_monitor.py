@@ -13,10 +13,6 @@ from database import is_notified, save_blog
 
 async def send_images(channel, images):
 
-    if not images:
-        return
-
-
     async with aiohttp.ClientSession() as session:
 
         files = []
@@ -31,7 +27,7 @@ async def send_images(channel, images):
 
                 async with session.get(
                     image_url,
-                    timeout=20
+                    timeout=15
                 ) as resp:
 
 
@@ -53,9 +49,10 @@ async def send_images(channel, images):
             except Exception as e:
 
                 print(
-                    "画像取得エラー:",
+                    "画像ダウンロードエラー:",
                     e
                 )
+
 
 
         if not files:
@@ -70,19 +67,9 @@ async def send_images(channel, images):
             10
         ):
 
-            try:
-
-                await channel.send(
-                    files=files[start:start + 10]
-                )
-
-
-            except Exception as e:
-
-                print(
-                    "画像送信エラー:",
-                    e
-                )
+            await channel.send(
+                files=files[start:start + 10]
+            )
 
 
 
@@ -101,7 +88,6 @@ async def check_blog(bot):
             )
 
 
-
             if not blogs:
 
                 await asyncio.sleep(
@@ -115,132 +101,153 @@ async def check_blog(bot):
             for blog in blogs:
 
 
-                if not isinstance(
-                    blog,
-                    dict
-                ):
-
-                    continue
+                try:
 
 
+                    if not isinstance(
+                        blog,
+                        dict
+                    ):
 
-                url = blog.get(
-                    "url"
-                )
+                        print(
+                            "不正データ:",
+                            blog
+                        )
 
-
-                if not url:
-
-                    continue
+                        continue
 
 
 
-                # =====================
-                # DB確認
-                # =====================
+                    url = blog.get(
+                        "url"
+                    )
 
-                if is_notified(url):
+
+                    if not url:
+
+                        continue
+
+
+
+                    # =====================
+                    # DB確認
+                    # =====================
+
+                    if is_notified(url):
+
+                        print(
+                            "通知済み:",
+                            url
+                        )
+
+                        continue
+
+
+
+                    group = blog.get(
+                        "group",
+                        ""
+                    )
+
+
+
+                    # =====================
+                    # DB保存
+                    # （最初に登録）
+                    # =====================
+
+                    save_blog(
+                        url,
+                        group,
+                        blog.get(
+                            "member",
+                            ""
+                        ),
+                        blog.get(
+                            "title",
+                            ""
+                        ),
+                        blog.get(
+                            "date",
+                            ""
+                        )
+                    )
+
 
                     print(
-                        "通知済み:",
+                        "DB保存:",
                         url
                     )
 
-                    continue
 
 
+                    # =====================
+                    # チャンネル取得
+                    # =====================
 
-                group = blog.get(
-                    "group",
-                    ""
-                )
-
-
-                member = blog.get(
-                    "member",
-                    ""
-                )
-
-
-                title = blog.get(
-                    "title",
-                    ""
-                )
-
-
-                date = blog.get(
-                    "date",
-                    ""
-                )
-
-
-
-                # =====================
-                # DB保存
-                # ★ここで先に登録
-                # =====================
-
-                save_blog(
-                    url,
-                    group,
-                    member,
-                    title,
-                    date
-                )
-
-
-                print(
-                    "DB保存:",
-                    url
-                )
-
-
-
-                # =====================
-                # チャンネル取得
-                # =====================
-
-                channel_id = BLOG_CHANNELS.get(
-                    group
-                )
-
-
-                if not channel_id:
-
-                    print(
-                        "チャンネルなし:",
+                    channel_id = BLOG_CHANNELS.get(
                         group
                     )
 
-                    continue
+
+                    if not channel_id:
+
+                        print(
+                            "チャンネルなし:",
+                            group
+                        )
+
+                        continue
 
 
 
-                channel = bot.get_channel(
-                    channel_id
-                )
+                    try:
+
+                        channel = bot.get_channel(
+                            channel_id
+                        )
 
 
-                if not channel:
+                        if channel is None:
 
-                    print(
-                        "チャンネル取得失敗:",
-                        channel_id
-                    )
-
-                    continue
+                            channel = await bot.fetch_channel(
+                                channel_id
+                            )
 
 
+                    except Exception as e:
 
-                # =====================
-                # 画像取得
-                # =====================
+                        print(
+                            "チャンネル取得エラー:",
+                            e
+                        )
 
-                try:
+                        continue
 
-                    detail = get_images(
-                        url
-                    )
+
+
+                    # =====================
+                    # 画像取得
+                    # =====================
+
+                    try:
+
+                        detail = get_images(
+                            url
+                        )
+
+
+                    except Exception as e:
+
+                        print(
+                            "画像取得処理エラー:",
+                            e
+                        )
+
+                        detail = {
+                            "images": []
+                        }
+
 
 
                     images = detail.get(
@@ -249,65 +256,54 @@ async def check_blog(bot):
                     )
 
 
-                except Exception as e:
 
-                    print(
-                        "画像解析エラー:",
-                        e
+                    # =====================
+                    # 通知文章
+                    # =====================
+
+                    text = (
+                        f"🏷️ {group}\n"
+                        f"👤 {blog.get('member','')}\n"
+                        f"📝 {blog.get('title','')}\n"
+                        f"📅 {blog.get('date','')}\n"
+                        f"🔗 {url}\n\n"
+                        f"📷 ブログ画像 ({len(images)}枚)"
                     )
 
-                    images = []
 
-
-
-                # =====================
-                # 通知文章
-                # =====================
-
-                message = (
-                    f"🏷️ {group}\n"
-                    f"👤 {member}\n"
-                    f"📝 {title}\n"
-                    f"📅 {date}\n"
-                    f"🔗 {url}\n\n"
-                    f"📷 ブログ画像 {len(images)}枚"
-                )
-
-
-
-                try:
 
                     await channel.send(
-                        message,
+                        text,
                         suppress_embeds=True
                     )
 
 
+
+                    # =====================
+                    # 画像送信
+                    # =====================
+
+                    if images:
+
+                        await send_images(
+                            channel,
+                            images
+                        )
+
+                    else:
+
+                        print(
+                            "画像なし:",
+                            url
+                        )
+
+
+
                 except Exception as e:
 
                     print(
-                        "通知送信エラー:",
+                        "ブログ1件処理エラー:",
                         e
-                    )
-
-
-
-                # =====================
-                # 画像送信
-                # =====================
-
-                if images:
-
-                    await send_images(
-                        channel,
-                        images
-                    )
-
-                else:
-
-                    print(
-                        "画像なし:",
-                        url
                     )
 
 
