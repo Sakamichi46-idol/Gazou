@@ -312,44 +312,47 @@ def get_hinatazaka_latest():
         )
 
 
-        item = soup.select_one(
-            "li.p-blog-top__item"
+        card = soup.select_one(
+            "div.p-blog-main__card"
         )
 
 
-        if not item:
+        if not card:
 
             print(
-                "日向坂ブログ取得失敗"
+                "日向坂カード取得失敗"
             )
 
             return None
 
 
 
-        link = item.find(
-            "a",
-            href=True
+        link = card.select_one(
+            "a.p-blog-main__head"
         )
 
 
-        name = item.select_one(
-            ".c-blog-top__name"
+        name = card.select_one(
+            ".c-blog-main__name"
         )
 
 
-        title = item.select_one(
-            ".c-blog-top__title"
+        title = card.select_one(
+            ".c-blog-main__title"
         )
 
 
-        date = item.select_one(
-            ".c-blog-top__date"
+        date = card.select_one(
+            ".c-blog-main__date"
         )
-
 
 
         if not link:
+
+            print(
+                "日向坂URL取得失敗"
+            )
+
             return None
 
 
@@ -400,7 +403,6 @@ def get_hinatazaka_latest():
         )
 
         return None
-
 
 
 
