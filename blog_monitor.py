@@ -53,6 +53,7 @@ async def send_images(channel, images):
                 )
 
 
+
         if not files:
 
             return
@@ -71,6 +72,8 @@ async def send_images(channel, images):
 
 
 
+
+
 async def check_blog(bot):
 
     while True:
@@ -86,6 +89,7 @@ async def check_blog(bot):
             )
 
 
+
             if not blogs:
 
                 print(
@@ -98,8 +102,11 @@ async def check_blog(bot):
 
 
 
+
             for blog in blogs:
 
+
+                # 辞書チェック
 
                 if not isinstance(
                     blog,
@@ -107,7 +114,7 @@ async def check_blog(bot):
                 ):
 
                     print(
-                        "不正なブログデータ:",
+                        "不正データ:",
                         blog
                     )
 
@@ -131,13 +138,21 @@ async def check_blog(bot):
 
 
 
-                # 通知済みならスキップ
+
+                # 通知済み確認
 
                 if is_notified(
                     url
                 ):
 
+                    print(
+                        "通知済み:",
+                        url
+                    )
+
                     continue
+
+
 
 
 
@@ -145,7 +160,6 @@ async def check_blog(bot):
                     "group",
                     ""
                 )
-
 
 
                 channel_id = BLOG_CHANNELS.get(
@@ -157,15 +171,22 @@ async def check_blog(bot):
                 if not channel_id:
 
                     print(
-                        f"{group} のチャンネル未設定"
+                        f"{group} チャンネル未設定"
                     )
 
                     continue
 
 
 
+
                 channel = bot.get_channel(
                     channel_id
+                )
+
+
+                print(
+                    "CHANNEL:",
+                    channel
                 )
 
 
@@ -181,6 +202,8 @@ async def check_blog(bot):
 
 
 
+
+
                 # ブログ情報送信
 
                 await channel.send(
@@ -193,10 +216,24 @@ async def check_blog(bot):
 
 
 
+
+
                 # 画像取得
+
+                print(
+                    "画像取得開始:",
+                    url
+                )
+
 
                 detail = get_images(
                     url
+                )
+
+
+                print(
+                    "画像取得結果:",
+                    detail
                 )
 
 
@@ -230,11 +267,20 @@ async def check_blog(bot):
 
 
 
+
+
                 # DB保存
 
                 save_blog(
                     blog
                 )
+
+
+                print(
+                    "保存完了:",
+                    url
+                )
+
 
 
 
