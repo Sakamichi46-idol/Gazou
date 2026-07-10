@@ -350,139 +350,74 @@ def get_sakurazaka_latest():
 
 def get_hinatazaka_latest():
 
-    url = (
-        "https://www.hinatazaka46.com"
-        "/s/official/diary/member/list"
-        "?ima=0000"
+    url = "https://www.hinatazaka46.com/s/official/diary/member/list?ima=0000"
+
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=10
+    )
+
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
     )
 
 
-    try:
-
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=10
-        )
+    blogs = []
 
 
-        response.raise_for_status()
+    for item in soup.select(
+        "li.p-blog-top__item"
+    ):
 
-
-
-        soup = BeautifulSoup(
-            response.text,
-            "lxml"
-        )
-
-
-
-        card = soup.select_one(
-            "div.p-blog-main__card"
-        )
-
-
-        if not card:
-
-            print(
-                "日向坂カード取得失敗"
-            )
-
-            return None
-
-
-
-        link = card.select_one(
-            "a.p-blog-main__head"
-        )
-
+        link = item.find("a")
 
         if not link:
-
-            print(
-                "日向坂URL取得失敗"
-            )
-
-            return None
+            continue
 
 
+        href = link.get("href")
 
-        name = card.select_one(
-            ".c-blog-main__name"
+        if not href:
+            continue
+
+
+        url = urljoin(
+            url,
+            href
         )
 
 
-        title = card.select_one(
-            ".c-blog-main__title"
+        member = item.select_one(
+            ".c-blog-top__name"
+        )
+
+        title = item.select_one(
+            ".c-blog-top__title"
+        )
+
+        date = item.select_one(
+            ".c-blog-top__date"
         )
 
 
-        date = card.select_one(
-            ".c-blog-main__date"
+        blogs.append(
+            {
+                "group": "日向坂46",
+                "url": url,
+                "member": member.get_text(strip=True) if member else "",
+                "title": title.get_text(strip=True) if title else "",
+                "date": normalize_datetime(
+                    date.get_text(strip=True)
+                ) if date else ""
+            }
         )
 
 
-
-        result = {
-
-            "group": "日向坂46",
-
-
-            "url": urljoin(
-                "https://www.hinatazaka46.com",
-                link["href"]
-            ),
-
-
-            "member": (
-                name.get_text(
-                    strip=True
-                )
-                if name else ""
-            ),
-
-
-            "title": (
-                title.get_text(
-                    strip=True
-                )
-                if title else ""
-            ),
-
-
-            "date": (
-                date.get_text(
-                    strip=True
-                )
-                if date else ""
-            ),
-
-
-            "text": ""
-
-        }
-
-
-
-        print(
-            "日向坂取得:",
-            result
-        )
-
-
-        return result
-
-
-
-    except Exception as e:
-
-        print(
-            "日向坂取得エラー:",
-            e
-        )
-
-        return None
-
+    return blogs
 
 
 
