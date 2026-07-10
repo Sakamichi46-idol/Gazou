@@ -7,41 +7,53 @@ DB_NAME = "blogs.db"
 
 def init_db():
 
-    with sqlite3.connect(DB_NAME) as conn:
+    conn = sqlite3.connect(
+        DB_NAME
+    )
 
-        cur = conn.cursor()
+    cur = conn.cursor()
 
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS blogs (
-                url TEXT PRIMARY KEY,
-                group_name TEXT,
-                title TEXT,
-                date TEXT
-            )
-            """
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS blogs (
+            url TEXT PRIMARY KEY,
+            group_name TEXT,
+            title TEXT,
+            date TEXT
         )
+        """
+    )
 
-        conn.commit()
+
+    conn.commit()
+    conn.close()
 
 
 
 def is_notified(url):
 
-    with sqlite3.connect(DB_NAME) as conn:
+    conn = sqlite3.connect(
+        DB_NAME
+    )
 
-        cur = conn.cursor()
+    cur = conn.cursor()
 
-        cur.execute(
-            """
-            SELECT url
-            FROM blogs
-            WHERE url = ?
-            """,
-            (url,)
-        )
 
-        result = cur.fetchone()
+    cur.execute(
+        """
+        SELECT url
+        FROM blogs
+        WHERE url = ?
+        """,
+        (url,)
+    )
+
+
+    result = cur.fetchone()
+
+
+    conn.close()
 
 
     return result is not None
@@ -50,37 +62,33 @@ def is_notified(url):
 
 def save_blog(blog):
 
-    if not blog:
-        return
+    conn = sqlite3.connect(
+        DB_NAME
+    )
+
+    cur = conn.cursor()
 
 
-    with sqlite3.connect(DB_NAME) as conn:
-
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            INSERT OR IGNORE INTO blogs
-            (
-                url,
-                group_name,
-                title,
-                date
-            )
-            VALUES
-            (
-                ?,
-                ?,
-                ?,
-                ?
-            )
-            """,
-            (
-                blog.get("url"),
-                blog.get("group"),
-                blog.get("title"),
-                blog.get("date")
-            )
+    cur.execute(
+        """
+        INSERT OR IGNORE INTO blogs
+        (
+            url,
+            group_name,
+            title,
+            date
         )
+        VALUES
+        (?, ?, ?, ?)
+        """,
+        (
+            blog.get("url"),
+            blog.get("group"),
+            blog.get("title"),
+            blog.get("date")
+        )
+    )
 
-        conn.commit()
+
+    conn.commit()
+    conn.close()
