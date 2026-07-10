@@ -291,6 +291,7 @@ def get_hinatazaka_latest():
     url = (
         "https://www.hinatazaka46.com"
         "/s/official/diary/member/list"
+        "?ima=0000"
     )
 
 
@@ -302,9 +303,7 @@ def get_hinatazaka_latest():
             timeout=10
         )
 
-
         response.raise_for_status()
-
 
 
         soup = BeautifulSoup(
@@ -313,13 +312,12 @@ def get_hinatazaka_latest():
         )
 
 
-
-        article = soup.select_one(
+        item = soup.select_one(
             "li.p-blog-top__item"
         )
 
 
-        if not article:
+        if not item:
 
             print(
                 "日向坂ブログ取得失敗"
@@ -329,37 +327,30 @@ def get_hinatazaka_latest():
 
 
 
-        link = article.select_one(
-            "a[href]"
+        link = item.find(
+            "a",
+            href=True
         )
 
 
-        if not link:
-
-            return None
-
-
-
-        blog_url = urljoin(
-            url,
-            link["href"]
-        )
-
-
-
-        member = article.select_one(
+        name = item.select_one(
             ".c-blog-top__name"
         )
 
 
-        title = article.select_one(
+        title = item.select_one(
             ".c-blog-top__title"
         )
 
 
-        date = article.select_one(
+        date = item.select_one(
             ".c-blog-top__date"
         )
+
+
+
+        if not link:
+            return None
 
 
 
@@ -367,34 +358,28 @@ def get_hinatazaka_latest():
 
             "group": "日向坂46",
 
-            "url": blog_url,
+            "url":
+                urljoin(
+                    "https://www.hinatazaka46.com",
+                    link["href"]
+                ),
 
-            "member": (
-                member.get_text(
-                    strip=True
-                )
-                if member else ""
-            ),
+            "member":
+                name.text.strip()
+                if name else "",
 
-            "title": (
-                title.get_text(
-                    " ",
-                    strip=True
-                )
-                if title else ""
-            ),
+            "title":
+                title.text.strip()
+                if title else "",
 
-            "date": (
-                date.get_text(
-                    strip=True
-                )
-                if date else ""
-            ),
+            "date":
+                date.text.strip()
+                if date else "",
 
-            "text": ""
+            "text":
+                ""
 
         }
-
 
 
         print(
@@ -415,7 +400,6 @@ def get_hinatazaka_latest():
         )
 
         return None
-
 
 
 
