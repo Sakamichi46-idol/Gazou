@@ -10,9 +10,6 @@ HEADERS = {
 }
 
 
-BASE_URL = "https://www.nogizaka46.com"
-
-
 def get_nogizaka_images(url):
 
     response = requests.get(
@@ -32,15 +29,15 @@ def get_nogizaka_images(url):
 
     blog = {
         "group": "乃木坂46",
-        "url": url,
         "member": "",
         "title": "",
         "date": "",
+        "url": url,
         "images": []
     }
 
 
-    # タイトル
+    # タイトル取得
     title = soup.find("h1")
 
     if title:
@@ -49,7 +46,7 @@ def get_nogizaka_images(url):
         )
 
 
-    # メンバー
+    # メンバー名取得
     member = soup.find(
         class_="bd--prof__name"
     )
@@ -60,7 +57,7 @@ def get_nogizaka_images(url):
         )
 
 
-    # 日付
+    # 投稿日取得
     date = soup.find(
         class_="bd--hd__date"
     )
@@ -74,19 +71,18 @@ def get_nogizaka_images(url):
         )
 
 
-    # 本文
+    # 本文エリア取得
     article = (
         soup.find(
             "div",
             class_="bd--edit"
         )
         or soup.find(
-            "div",
-            class_="bd--edit__body"
+            "article"
         )
-        or soup.find("article")
-        or soup.find("main")
-        or soup.find("p")
+        or soup.find(
+            "main"
+        )
     )
 
 
@@ -94,10 +90,11 @@ def get_nogizaka_images(url):
         article = soup
 
 
-    # 画像
+
     seen = set()
 
 
+    # 画像取得
     for img in article.find_all("img"):
 
         src = img.get("src")
@@ -108,21 +105,23 @@ def get_nogizaka_images(url):
 
 
         image_url = urljoin(
-            BASE_URL,
+            url,
             src
         )
 
 
-        # 乃木坂ブログ画像だけ
+        # 乃木坂ブログ画像のみ
         if "/files/46/diary/" not in image_url:
             continue
 
 
+        # 重複削除
         if image_url in seen:
             continue
 
 
         seen.add(image_url)
+
 
         blog["images"].append(
             image_url
