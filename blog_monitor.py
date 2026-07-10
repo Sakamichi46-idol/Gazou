@@ -9,23 +9,14 @@ from image_getter import get_images
 from config import BLOG_CHANNELS
 from database import is_notified, save_blog
 
-blogs = get_latest_blog()
 
-print(
-    "TYPE:",
-    type(blogs)
-)
-
-print(
-    "BLOG TYPE:",
-    type(blogs[0])
-)
 
 async def send_images(channel, images):
 
     async with aiohttp.ClientSession() as session:
 
         files = []
+
 
         for i, image_url in enumerate(
             images,
@@ -37,6 +28,7 @@ async def send_images(channel, images):
                 async with session.get(
                     image_url
                 ) as resp:
+
 
                     if resp.status != 200:
                         continue
@@ -62,7 +54,9 @@ async def send_images(channel, images):
 
 
         if not files:
+
             return
+
 
 
         for start in range(
@@ -99,14 +93,13 @@ async def check_blog(bot):
                 )
 
                 await asyncio.sleep(600)
+
                 continue
 
 
 
             for blog in blogs:
 
-
-                # 辞書以外ならスキップ
 
                 if not isinstance(
                     blog,
@@ -138,6 +131,8 @@ async def check_blog(bot):
 
 
 
+                # 通知済みならスキップ
+
                 if is_notified(
                     url
                 ):
@@ -152,9 +147,11 @@ async def check_blog(bot):
                 )
 
 
+
                 channel_id = BLOG_CHANNELS.get(
                     group
                 )
+
 
 
                 if not channel_id:
@@ -170,6 +167,7 @@ async def check_blog(bot):
                 channel = bot.get_channel(
                     channel_id
                 )
+
 
 
                 if channel is None:
@@ -208,6 +206,7 @@ async def check_blog(bot):
                 )
 
 
+
                 if images:
 
                     await channel.send(
@@ -234,7 +233,7 @@ async def check_blog(bot):
                 # DB保存
 
                 save_blog(
-                    url
+                    blog
                 )
 
 
