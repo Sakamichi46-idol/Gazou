@@ -63,8 +63,18 @@ def is_notified(url):
 
 def save_blog(blog):
 
+    print(
+
+        "DB保存開始:",
+
+        blog.get("url")
+
+    )
+
     conn = sqlite3.connect(
+
         DB_NAME
+
     )
 
     cur = conn.cursor()
