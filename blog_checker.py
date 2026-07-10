@@ -13,6 +13,7 @@ HEADERS = {
         "Mozilla/5.0 "
         "(Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
         "Chrome/120 Safari/537.36"
     ),
     "Accept-Language": "ja-JP,ja;q=0.9",
@@ -45,29 +46,23 @@ def get_nogizaka_latest():
 
         response.raise_for_status()
 
-
         match = re.search(
             r"res\((.*)\)",
             response.text
         )
 
-
         if not match:
             print("乃木坂API解析失敗")
             return None
-
 
         data = json.loads(
             match.group(1)
         )
 
-
         if not data.get("data"):
             return None
 
-
         blog = data["data"][0]
-
 
         result = {
 
@@ -99,15 +94,12 @@ def get_nogizaka_latest():
                 "text",
                 ""
             )
-
         }
-
 
         print(
             "乃木坂取得:",
             result
         )
-
 
         return result
 
@@ -133,7 +125,6 @@ def get_sakurazaka_latest():
         "https://sakurazaka46.com"
         "/s/s46/diary/blog/list"
     )
-
 
     try:
 
@@ -166,7 +157,6 @@ def get_sakurazaka_latest():
             return None
 
 
-
         link = article.select_one(
             "a[href]"
         )
@@ -175,7 +165,6 @@ def get_sakurazaka_latest():
         if not link:
 
             return None
-
 
 
         blog_url = urljoin(
@@ -201,11 +190,9 @@ def get_sakurazaka_latest():
 
         date = ""
 
-
         date_tag = detail_soup.select_one(
             ".blog-foot .date"
         )
-
 
         if date_tag:
 
@@ -214,7 +201,6 @@ def get_sakurazaka_latest():
                     strip=True
                 )
             )
-
 
 
         member = article.select_one(
@@ -303,7 +289,6 @@ def get_hinatazaka_latest():
             timeout=10
         )
 
-
         response.raise_for_status()
 
 
@@ -334,18 +319,14 @@ def get_hinatazaka_latest():
 
 
         if not links:
-            return []
 
-
-
-        link = links[0]
+            return None
 
 
         blog_url = urljoin(
             list_url,
-            link["href"]
+            links[0]["href"]
         )
-
 
 
         detail = requests.get(
@@ -357,73 +338,122 @@ def get_hinatazaka_latest():
         detail.raise_for_status()
 
 
-
         detail_soup = BeautifulSoup(
             detail.text,
             "lxml"
         )
 
 
-        # 本文
+        # -----------------
+        # 本文取得
+        # -----------------
 
-        body = detail_soup.select_one(
-            ".p-blog-detail__text"
-        )
+        body = None
 
 
-        if not body:
+        body_selectors = [
+
+            ".p-blog-detail__text",
+
+            ".c-blog-detail__text",
+
+            ".blog-article",
+
+            ".c-blog_detail",
+
+            "article"
+
+        ]
+
+
+        for selector in body_selectors:
 
             body = detail_soup.select_one(
-                ".c-blog-detail__text"
+                selector
             )
 
+            if body:
 
-        if not body:
-
-            body = detail_soup.select_one(
-                "article"
-            )
+                break
 
 
 
-        # メンバー名
+        # -----------------
+        # メンバー取得
+        # -----------------
 
         member = ""
 
 
-        member_tag = detail_soup.select_one(
-            ".p-blog-detail__profile-name"
-        )
+        member_selectors = [
+
+            ".p-blog-detail__profile-name",
+
+            ".c-blog-detail__profile-name",
+
+            ".name",
+
+            ".member-name"
+
+        ]
 
 
-        if member_tag:
+        for selector in member_selectors:
 
-            member = member_tag.get_text(
-                strip=True
+            tag = detail_soup.select_one(
+                selector
             )
 
+            if tag:
+
+                member = tag.get_text(
+                    strip=True
+                )
+
+                break
 
 
-        # タイトル
+
+        # -----------------
+        # タイトル取得
+        # -----------------
 
         title = ""
 
 
-        title_tag = detail_soup.select_one(
-            ".p-blog-detail__title"
-        )
+        title_selectors = [
+
+            ".p-blog-detail__title",
+
+            ".c-blog-detail__title",
+
+            ".title",
+
+            "h1"
+
+        ]
 
 
-        if title_tag:
+        for selector in title_selectors:
 
-            title = title_tag.get_text(
-                " ",
-                strip=True
+            tag = detail_soup.select_one(
+                selector
             )
 
+            if tag:
+
+                title = tag.get_text(
+                    " ",
+                    strip=True
+                )
+
+                break
 
 
-        # 日付
+
+        # -----------------
+        # 日付取得
+        # -----------------
 
         date = ""
 
@@ -441,6 +471,26 @@ def get_hinatazaka_latest():
                 )
             )
 
+
+        if not body:
+
+            print(
+                "日向坂本文取得失敗"
+            )
+
+
+        if not member:
+
+            print(
+                "日向坂メンバー取得失敗"
+            )
+
+
+        if not title:
+
+            print(
+                "日向坂タイトル取得失敗"
+            )
 
 
         result = {
@@ -462,14 +512,13 @@ def get_hinatazaka_latest():
         }
 
 
-
         print(
             "日向坂取得:",
             result
         )
 
 
-        return [result]
+        return result
 
 
 
@@ -480,7 +529,7 @@ def get_hinatazaka_latest():
             e
         )
 
-        return []
+        return None
 
 
 
@@ -528,7 +577,6 @@ def get_latest_blog():
             results.extend(
                 blog
             )
-
 
 
     print(
