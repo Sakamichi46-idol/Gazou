@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 DB_NAME = "/app/data/blogs.db"
 
 
-
 def normalize_url(url):
 
     if not url:
