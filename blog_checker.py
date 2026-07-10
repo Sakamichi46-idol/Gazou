@@ -294,7 +294,7 @@ def get_sakurazaka_latest():
 
 def get_hinatazaka_latest():
 
-    list_url = (
+    base_url = (
         "https://www.hinatazaka46.com"
         "/s/official/diary/member/list?ima=0000"
     )
@@ -303,14 +303,12 @@ def get_hinatazaka_latest():
     try:
 
         response = requests.get(
-            list_url,
+            base_url,
             headers=HEADERS,
             timeout=10
         )
 
-
         response.raise_for_status()
-
 
 
         soup = BeautifulSoup(
@@ -319,87 +317,89 @@ def get_hinatazaka_latest():
         )
 
 
+        blogs = []
 
-        item = soup.select_one(
+
+        for item in soup.select(
             "li.p-blog-top__item"
-        )
+        ):
+
+            link = item.find("a")
 
 
-        if not item:
-            print(
-                "日向坂カード取得失敗"
+            if not link:
+                continue
+
+
+            href = link.get("href")
+
+
+            if not href:
+                continue
+
+
+            blog_url = urljoin(
+                base_url,
+                href
             )
-            return None
 
 
-
-        link = item.find(
-            "a"
-        )
-
-
-        if not link:
-            return None
+            member = item.select_one(
+                ".c-blog-top__name"
+            )
 
 
-
-        blog_url = urljoin(
-            list_url,
-            link["href"]
-        )
+            title = item.select_one(
+                ".c-blog-top__title"
+            )
 
 
-        member = item.select_one(
-            ".c-blog-top__name"
-        )
+            date = item.select_one(
+                ".c-blog-top__date"
+            )
 
 
-        title = item.select_one(
-            ".c-blog-top__title"
-        )
+            blog = {
 
+                "group": "日向坂46",
 
-        date = item.select_one(
-            ".c-blog-top__date"
-        )
+                "url": blog_url,
 
+                "member": (
+                    member.get_text(strip=True)
+                    if member
+                    else ""
+                ),
 
+                "title": (
+                    title.get_text(strip=True)
+                    if title
+                    else ""
+                ),
 
-        result = {
-
-            "group": "日向坂46",
-
-            "url": blog_url,
-
-            "member": (
-                member.get_text(strip=True)
-                if member else ""
-            ),
-
-            "title": (
-                title.get_text(strip=True)
-                if title else ""
-            ),
-
-            "date": (
-                normalize_datetime(
-                    date.get_text(strip=True)
+                "date": (
+                    normalize_datetime(
+                        date.get_text(strip=True)
+                    )
+                    if date
+                    else ""
                 )
-                if date else ""
-            ),
 
-            "text": ""
+            }
 
-        }
+
+            blogs.append(
+                blog
+            )
 
 
         print(
             "日向坂取得:",
-            result
+            blogs[:1]
         )
 
 
-        return result
+        return blogs
 
 
 
@@ -410,7 +410,7 @@ def get_hinatazaka_latest():
             e
         )
 
-        return None
+        return []
 
 
 
