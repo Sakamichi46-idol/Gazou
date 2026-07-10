@@ -74,3 +74,27 @@ def get_hinatazaka_latest():
     # ここに後で日向坂用を書く
 
     return None
+
+
+
+
+
+def get_latest_blog():
+
+    results = []
+
+
+    blogs = [
+        get_nogizaka_latest(),
+        get_sakurazaka_latest(),
+        get_hinatazaka_latest()
+    ]
+
+
+    for blog in blogs:
+
+        if blog:
+            results.append(blog)
+
+
+    return results
