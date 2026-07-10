@@ -30,6 +30,7 @@ def get_nogizaka_latest():
         "a",
         class_="m--postone__a"
     )
+    print("乃木坂 post:", post)
 
     if not post:
         return None
