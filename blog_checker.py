@@ -272,7 +272,7 @@ def get_sakurazaka_latest():
 # 日向坂46
 # =========================
 
-def get_hinata_latest():
+def get_hinatazaka_latest():
     import requests
     from bs4 import BeautifulSoup
     from urllib.parse import urljoin
