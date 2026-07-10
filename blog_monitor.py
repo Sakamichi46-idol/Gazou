@@ -174,7 +174,8 @@ async def check_blog(bot):
                     f"👤 {blog.get('member','')}\n"
                     f"📝 {blog.get('title','')}\n"
                     f"📅 {blog.get('date','')}\n"
-                    f"🔗 {url}"
+                    f"🔗 {url}",
+                    suppress_embeds = True
                 )
 
 
