@@ -84,48 +84,24 @@ def is_notified(url):
 
 
 
-def save_blog(blog):
+def save_blog(url, group_name, member, title, date):
 
-    url = normalize_url(
-        blog.get("url")
-    )
+    print("DB INSERT開始:", url)
 
-
-    print(
-        "DB保存開始:",
-        url
-    )
-
-
-    conn = sqlite3.connect(
-        DB_NAME
-    )
-
-
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-
 
     cur.execute(
         """
         INSERT OR IGNORE INTO blogs
-        (
-            url,
-            group_name,
-            title,
-            date
-        )
-        VALUES
-        (?, ?, ?, ?)
+        (url, group_name, member, title, date)
+        VALUES (?, ?, ?, ?, ?)
         """,
-        (
-            url,
-            blog.get("group"),
-            blog.get("title"),
-            blog.get("date")
-        )
+        (url, group_name, member, title, date)
     )
 
-
     conn.commit()
+
+    print("DB INSERT完了:", url)
 
     conn.close()
