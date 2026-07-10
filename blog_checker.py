@@ -4,13 +4,19 @@ from urllib.parse import urljoin
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "Chrome/120 Safari/537.36"
+    ),
+    "Referer": "https://www.nogizaka46.com/"
 }
 
 
 def get_nogizaka_latest():
 
-    url = "https://www.nogizaka46.com/s/n46/diary/MEMBER"
+    url = "https://www.nogizaka46.com/s/n46/diary/MEMBER?ima=3331"
 
     response = requests.get(
         url,
