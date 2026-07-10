@@ -1,5 +1,7 @@
 discord.py
+python-dotenv
+flask
 requests
 beautifulsoup4
-python-dotenv
 aiohttp
+lxml
