@@ -17,7 +17,6 @@ async def send_images(channel, images):
 
         files = []
 
-
         for i, image_url in enumerate(
             images,
             start=1
@@ -28,7 +27,6 @@ async def send_images(channel, images):
                 async with session.get(
                     image_url
                 ) as resp:
-
 
                     if resp.status != 200:
                         continue
@@ -170,7 +168,7 @@ async def check_blog(bot):
 
 
 
-                # ブログ情報
+                # ブログ情報通知
 
                 await channel.send(
                     f"🏷️ {group}\n"
@@ -178,7 +176,7 @@ async def check_blog(bot):
                     f"📝 {blog.get('title','')}\n"
                     f"📅 {blog.get('date','')}\n"
                     f"🔗 {url}",
-                    suppress_embeds = True
+                    suppress_embeds=True
                 )
 
 
@@ -210,7 +208,6 @@ async def check_blog(bot):
                     )
 
 
-
                 else:
 
                     print(
@@ -220,11 +217,15 @@ async def check_blog(bot):
 
 
 
-                # ★ここが修正点
-                # urlではなくblog全部渡す
+                # DB保存
+                # 修正箇所
 
                 save_blog(
-                    blog
+                    blog.get("url"),
+                    blog.get("group", ""),
+                    blog.get("member", ""),
+                    blog.get("title", ""),
+                    blog.get("date", "")
                 )
 
 
