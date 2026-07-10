@@ -83,18 +83,9 @@ async def check_blog(bot):
                 url = blog["url"]
 
 
-                # 初回起動時は通知しない
-                if group not in last_urls:
-
-                    last_urls[group] = url
+                # 送信済みならスキップ
+                if is_notified(url):
                     continue
-
-
-
-                # 新しい記事
-                if url != last_urls[group]:
-
-                    last_urls[group] = url
 
 
 
@@ -150,6 +141,7 @@ async def check_blog(bot):
                             channel,
                             images
                         )
+                    save_blog(url)
 
 
 
