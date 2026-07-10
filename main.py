@@ -30,9 +30,14 @@ url_pattern = re.compile(
 )
 
 
+blog_task = None
+
+
 
 @bot.event
 async def on_ready():
+
+    global blog_task
 
     init_db()
 
@@ -41,9 +46,21 @@ async def on_ready():
     )
 
 
-    bot.loop.create_task(
-        check_blog(bot)
-    )
+    if blog_task is None:
+
+        blog_task = bot.loop.create_task(
+            check_blog(bot)
+        )
+
+        print(
+            "ブログ監視開始"
+        )
+
+    else:
+
+        print(
+            "ブログ監視は既に起動済み"
+        )
 
 
 
@@ -84,7 +101,8 @@ async def latest(ctx):
 
 
         await ctx.send(
-            text
+            text,
+            suppress_embeds=True
         )
 
 
@@ -93,6 +111,7 @@ async def latest(ctx):
 async def on_message(message):
 
     if message.author.bot:
+
         return
 
 
@@ -183,6 +202,7 @@ async def on_message(message):
 
 
                             if resp.status != 200:
+
                                 continue
 
 
@@ -225,12 +245,15 @@ async def on_message(message):
         except Exception as e:
 
             print(
-                f"画像処理エラー: {e}"
+                "画像処理エラー:",
+                e
             )
+
 
             await message.channel.send(
                 f"エラー: {e}"
             )
+
 
 
     await bot.process_commands(
@@ -239,4 +262,6 @@ async def on_message(message):
 
 
 
-bot.run(TOKEN)
+bot.run(
+    TOKEN
+)
