@@ -28,7 +28,16 @@ def init_db():
     print("DB PATH:", DB_NAME)
     print("DB EXISTS:", os.path.exists(DB_NAME))
 
-    conn = sqlite3.connect(DB_NAME)
+
+    os.makedirs(
+        os.path.dirname(DB_NAME),
+        exist_ok=True
+    )
+
+
+    conn = sqlite3.connect(
+        DB_NAME
+    )
 
     cur = conn.cursor()
 
@@ -38,6 +47,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS blogs (
             url TEXT PRIMARY KEY,
             group_name TEXT,
+            member TEXT,
             title TEXT,
             date TEXT
         )
@@ -52,7 +62,9 @@ def init_db():
 
 def is_notified(url):
 
-    url = normalize_url(url)
+    url = normalize_url(
+        url
+    )
 
 
     conn = sqlite3.connect(
@@ -84,24 +96,61 @@ def is_notified(url):
 
 
 
-def save_blog(url, group_name, member, title, date):
+def save_blog(
+    url,
+    group_name,
+    member,
+    title,
+    date
+):
 
-    print("DB INSERT開始:", url)
+    url = normalize_url(
+        url
+    )
 
-    conn = sqlite3.connect(DB_PATH)
+
+    print(
+        "DB INSERT開始:",
+        url
+    )
+
+
+    conn = sqlite3.connect(
+        DB_NAME
+    )
+
     cur = conn.cursor()
+
 
     cur.execute(
         """
         INSERT OR IGNORE INTO blogs
-        (url, group_name, member, title, date)
+        (
+            url,
+            group_name,
+            member,
+            title,
+            date
+        )
         VALUES (?, ?, ?, ?, ?)
         """,
-        (url, group_name, member, title, date)
+        (
+            url,
+            group_name,
+            member,
+            title,
+            date
+        )
     )
+
 
     conn.commit()
 
-    print("DB INSERT完了:", url)
+
+    print(
+        "DB INSERT完了:",
+        url
+    )
+
 
     conn.close()
