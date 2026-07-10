@@ -8,7 +8,7 @@ from discord.ext import commands
 
 from image_getter import get_images
 from blog_checker import get_latest_blog
-
+from blog_monitor import check_blog
 
 TOKEN = os.getenv("TOKEN")
 
