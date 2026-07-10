@@ -155,7 +155,7 @@ def get_sakurazaka_latest():
     try:
 
         # -----------------
-        # 一覧ページ取得
+        # 一覧取得
         # -----------------
 
         response = requests.get(
@@ -219,9 +219,8 @@ def get_sakurazaka_latest():
 
 
 
-
         # -----------------
-        # 詳細ページ取得
+        # 詳細取得
         # -----------------
 
         detail_response = requests.get(
@@ -242,11 +241,13 @@ def get_sakurazaka_latest():
 
 
 
+        # -----------------
+        # 日付取得
+        # -----------------
+
         date = ""
 
 
-
-        # ★ 正しい日付
         date_tag = detail_soup.select_one(
             ".blog-foot .date"
         )
@@ -264,6 +265,24 @@ def get_sakurazaka_latest():
             "櫻坂詳細日付:",
             date
         )
+
+
+
+        # -----------------
+        # 本文取得
+        # -----------------
+
+        text = ""
+
+
+        article_body = detail_soup.select_one(
+            ".box-article"
+        )
+
+
+        if article_body:
+
+            text = str(article_body)
 
 
 
@@ -294,7 +313,7 @@ def get_sakurazaka_latest():
             "date": date,
 
 
-            "text": ""
+            "text": text
 
         }
 
