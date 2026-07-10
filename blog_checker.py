@@ -280,6 +280,7 @@ def get_hinatazaka_latest():
         "/s/official/diary/member/list?ima=0000"
     )
 
+
     try:
 
         response = requests.get(
@@ -338,20 +339,20 @@ def get_hinatazaka_latest():
 
 
 
-        # -----------------
-        # 本文
-        # -----------------
+        # =====================
+        # 本文取得
+        # =====================
 
         body = None
 
 
         selectors = [
 
-            ".p-blog-article__text",
-
             ".p-blog-detail__text",
 
             ".c-blog-detail__text",
+
+            ".p-blog-detail",
 
             ".blog-detail",
 
@@ -367,15 +368,18 @@ def get_hinatazaka_latest():
             )
 
             if body:
-                print(
-                    "日向坂本文取得:",
-                    selector
-                )
                 break
 
 
 
-        if not body:
+        if body:
+
+            print(
+                "日向坂本文取得成功:",
+                selector
+            )
+
+        else:
 
             print(
                 "日向坂本文取得失敗"
@@ -383,22 +387,22 @@ def get_hinatazaka_latest():
 
 
 
-        # -----------------
+        # =====================
         # メンバー
-        # -----------------
+        # =====================
 
         member = ""
 
 
         member_selectors = [
 
-            ".p-blog-article__name",
-
             ".p-blog-detail__profile-name",
 
-            ".c-blog-detail__profile-name",
+            ".name",
 
-            ".name"
+            ".member-name",
+
+            "h1"
 
         ]
 
@@ -415,16 +419,18 @@ def get_hinatazaka_latest():
                     strip=True
                 )
 
-                print(
-                    "日向坂メンバー取得:",
-                    selector
-                )
-
                 break
 
 
 
-        if not member:
+        if member:
+
+            print(
+                "日向坂メンバー:",
+                member
+            )
+
+        else:
 
             print(
                 "日向坂メンバー取得失敗"
@@ -432,9 +438,9 @@ def get_hinatazaka_latest():
 
 
 
-        # -----------------
+        # =====================
         # タイトル
-        # -----------------
+        # =====================
 
         title = ""
 
@@ -453,22 +459,22 @@ def get_hinatazaka_latest():
 
 
 
-        # -----------------
+        # =====================
         # 日付
-        # -----------------
+        # =====================
 
         date = ""
 
 
-        date_tag = detail_soup.select_one(
+        time_tag = detail_soup.select_one(
             "time"
         )
 
 
-        if date_tag:
+        if time_tag:
 
             date = normalize_datetime(
-                date_tag.get_text(
+                time_tag.get_text(
                     strip=True
                 )
             )
@@ -494,7 +500,6 @@ def get_hinatazaka_latest():
         }
 
 
-
         print(
             "日向坂取得:",
             result
@@ -502,7 +507,6 @@ def get_hinatazaka_latest():
 
 
         return [result]
-
 
 
     except Exception as e:
