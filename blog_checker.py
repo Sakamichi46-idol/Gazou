@@ -94,7 +94,6 @@ def get_latest_blog():
 
     results = []
 
-
     blogs = [
         get_nogizaka_latest(),
         get_sakurazaka_latest(),
@@ -107,5 +106,7 @@ def get_latest_blog():
         if blog:
             results.append(blog)
 
+
+    print("取得ブログ:", results)
 
     return results
