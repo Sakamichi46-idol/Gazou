@@ -139,12 +139,15 @@ async def on_message(message):
             if not images:
 
                 await message.channel.send(
-                    "画像が見つかりませんでした。"
+                    "画像が見つかりませんでした。",
+                    suppress_embeds=True
                 )
 
                 continue
 
 
+
+            # 通知文作成
 
             text = ""
 
@@ -174,6 +177,13 @@ async def on_message(message):
 
                 text += (
                     f"📅 {blog['date']}\n"
+                )
+
+
+            if blog.get("url"):
+
+                text += (
+                    f"🔗 {blog['url']}\n"
                 )
 
 
@@ -226,6 +236,19 @@ async def on_message(message):
 
 
 
+                if not files:
+
+                    await message.channel.send(
+                        "画像を取得できませんでした。",
+                        suppress_embeds=True
+                    )
+
+                    continue
+
+
+
+                # Discordの添付上限10枚対策
+
                 for start in range(
                     0,
                     len(files),
@@ -234,9 +257,12 @@ async def on_message(message):
 
                     await message.channel.send(
                         content=text,
-                        files=files[start:start+10]
+                        files=files[start:start+10],
+                        suppress_embeds=True
                     )
 
+
+                    # 2回目以降は文章を送らない
 
                     text = ""
 
@@ -251,7 +277,8 @@ async def on_message(message):
 
 
             await message.channel.send(
-                f"エラー: {e}"
+                f"エラー: {e}",
+                suppress_embeds=True
             )
 
 
