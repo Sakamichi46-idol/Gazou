@@ -8,8 +8,9 @@ from discord.ext import commands
 
 from image_getter import get_images
 from blog_checker import get_latest_blog
-from config import BLOG_CHANNELS
 from blog_monitor import check_blog
+from database import init_db
+
 
 TOKEN = os.getenv("TOKEN")
 
@@ -29,6 +30,7 @@ url_pattern = re.compile(
 )
 
 
+
 @bot.event
 async def on_ready():
 
@@ -37,11 +39,20 @@ async def on_ready():
     )
 
 
+    # SQLite初期化
+
+    init_db()
+
+
+    # ブログ監視開始
+
     bot.loop.create_task(
         check_blog(
             bot
         )
     )
+
+
 
 @bot.command()
 async def ping(ctx):
@@ -51,11 +62,47 @@ async def ping(ctx):
     )
 
 
+
+@bot.command()
+async def latest(ctx):
+
+    blogs = get_latest_blog()
+
+
+    if not blogs:
+
+        await ctx.send(
+            "ブログ取得失敗"
+        )
+
+        return
+
+
+
+    for blog in blogs:
+
+        text = (
+            f"🏷️ {blog.get('group','')}\n"
+            f"👤 {blog.get('member','')}\n"
+            f"📝 {blog.get('title','')}\n"
+            f"📅 {blog.get('date','')}\n"
+            f"🔗 {blog.get('url','')}"
+        )
+
+
+        await ctx.send(
+            text
+        )
+
+
+
 @bot.event
 async def on_message(message):
 
     if message.author.bot:
+
         return
+
 
 
     urls = url_pattern.findall(
@@ -67,9 +114,15 @@ async def on_message(message):
 
         try:
 
-            blog = get_images(url)
+            blog = get_images(
+                url
+            )
 
-            images = blog["images"]
+
+            images = blog.get(
+                "images",
+                []
+            )
 
 
             if not images:
@@ -79,6 +132,7 @@ async def on_message(message):
                 )
 
                 continue
+
 
 
             text = ""
@@ -118,115 +172,64 @@ async def on_message(message):
             )
 
 
-            # Discordは1回10枚まで
-            for start in range(
-                0,
-                len(images),
-                10
-            ):
 
-                batch = images[start:start + 10]
+            async with aiohttp.ClientSession() as session:
 
 
                 files = []
 
 
-                async with aiohttp.ClientSession() as session:
+                for i, image_url in enumerate(
+                    images,
+                    start=1
+                ):
 
-                    for i, image_url in enumerate(
-                        batch,
-                        start=1
-                    ):
+                    try:
 
-                        try:
-
-                            async with session.get(
-                                image_url
-                            ) as resp:
+                        async with session.get(
+                            image_url
+                        ) as resp:
 
 
-                                if resp.status != 200:
-                                    continue
+                            if resp.status != 200:
+
+                                continue
 
 
-                                data = await resp.read()
+
+                            data = await resp.read()
 
 
-                                files.append(
-                                    discord.File(
-                                        io.BytesIO(data),
-                                        filename=f"image{i}.jpg"
-                                    )
+                            files.append(
+                                discord.File(
+                                    io.BytesIO(data),
+                                    filename=f"image{i}.jpg"
                                 )
-
-
-                        except Exception as e:
-
-                            print(
-                                f"画像取得エラー: {e}"
                             )
 
 
-                if files:
+                    except Exception as e:
+
+                        print(
+                            f"画像取得エラー: {e}"
+                        )
+
+
+
+                for start in range(
+                    0,
+                    len(files),
+                    10
+                ):
 
                     await message.channel.send(
                         content=text,
-                        files=files
+                        files=files[start:start+10]
                     )
 
 
                     text = ""
 
 
+
         except Exception as e:
-
-            print(
-                e
-            )
-
-            await message.channel.send(
-                f"エラー: {e}"
-            )
-
-
-    await bot.process_commands(
-        message
-    )
-
-
-
-@bot.command()
-async def latest(ctx):
-
-    blogs = get_latest_blog()
-
-
-    if not blogs:
-
-        await ctx.send(
-            "ブログ取得失敗"
-        )
-
-        return
-
-
-
-    for blog in blogs:
-
-
-        text = (
-            f"🏷️ {blog.get('group', '')}\n"
-            f"👤 {blog.get('member', '')}\n"
-            f"📝 {blog.get('title', '')}\n"
-            f"📅 {blog.get('date', '')}\n"
-            f"🔗 {blog.get('url', '')}"
-        )
-
-
-        await ctx.send(
-            text
-        )
-
-
-
-bot.run(TOKEN)
