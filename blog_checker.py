@@ -18,8 +18,8 @@ HEADERS = {
 def get_nogizaka_latest():
 
     url = (
-        "https://www.nogizaka46.com/"
-        "s/n46/diary/MEMBER?ima=3331"
+        "https://www.nogizaka46.com"
+        "/s/n46/api/list/blog"
     )
 
 
@@ -37,103 +37,26 @@ def get_nogizaka_latest():
 
 
     print(
-        "乃木坂 STATUS:",
+        "乃木坂 API STATUS:",
         response.status_code
     )
 
+
     print(
-        "乃木坂 URL:",
-        response.url
+        response.text[:500]
     )
 
 
     response.raise_for_status()
 
 
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
-    )
-    print(
-        "m--postone:",
-        len(soup.find_all(class_="m--postone"))
-    )
-
-    print(
-        "detail:",
-        len(
-            soup.find_all(
-                href=True
-            )
-        )
-    )
-    
-    print(
-        "ba--all:",
-        soup.find(class_="ba--all")
-    )
-
-    post = soup.find(
-        "a",
-        class_="m--postone__a"
-    )
+    data = response.json()
 
 
-    print(
-        "乃木坂 post:",
-        post
-    )
+    print(data)
 
 
-    if not post:
-        return None
-
-
-
-    member = post.find(
-        class_="m--postone__name"
-    )
-
-
-    title = post.find(
-        class_="m--postone__ttl"
-    )
-
-
-    date = post.find(
-        class_="m--postone__time"
-    )
-
-
-    blog_url = post.get(
-        "href"
-    )
-
-
-    if blog_url:
-        blog_url = urljoin(
-            url,
-            blog_url
-        )
-
-
-    return {
-        "group": "乃木坂46",
-        "url": blog_url,
-        "member": (
-            member.get_text(strip=True)
-            if member else ""
-        ),
-        "title": (
-            title.get_text(strip=True)
-            if title else ""
-        ),
-        "date": (
-            date.get_text(strip=True)
-            if date else ""
-        )
-    }
-
+    return None
 
 
 def get_sakurazaka_latest():
