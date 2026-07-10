@@ -19,8 +19,6 @@ HEADERS = {
 }
 
 
-
-
 # =========================
 # 乃木坂46
 # =========================
@@ -55,9 +53,7 @@ def get_nogizaka_latest():
 
 
         if not match:
-            print(
-                "乃木坂API解析失敗"
-            )
+            print("乃木坂API解析失敗")
             return None
 
 
@@ -127,8 +123,6 @@ def get_nogizaka_latest():
 
 
 
-
-
 # =========================
 # 櫻坂46
 # =========================
@@ -190,7 +184,6 @@ def get_sakurazaka_latest():
         )
 
 
-
         detail = requests.get(
             blog_url,
             headers=HEADERS,
@@ -200,7 +193,6 @@ def get_sakurazaka_latest():
         detail.raise_for_status()
 
 
-
         detail_soup = BeautifulSoup(
             detail.text,
             "lxml"
@@ -208,6 +200,7 @@ def get_sakurazaka_latest():
 
 
         date = ""
+
 
         date_tag = detail_soup.select_one(
             ".blog-foot .date"
@@ -228,6 +221,7 @@ def get_sakurazaka_latest():
             ".name"
         )
 
+
         title = article.select_one(
             ".title"
         )
@@ -244,27 +238,27 @@ def get_sakurazaka_latest():
 
             "url": blog_url,
 
-            "member": (
+            "member":
                 member.get_text(
                     strip=True
                 )
-                if member else ""
-            ),
+                if member else "",
 
-            "title": (
+
+            "title":
                 title.get_text(
                     " ",
                     strip=True
                 )
-                if title else ""
-            ),
+                if title else "",
+
 
             "date": date,
 
-            "text": (
+
+            "text":
                 str(body)
                 if body else ""
-            )
 
         }
 
@@ -289,8 +283,6 @@ def get_sakurazaka_latest():
 
 
 
-
-
 # =========================
 # 日向坂46
 # =========================
@@ -302,6 +294,7 @@ def get_hinatazaka_latest():
         "/s/official/diary/member/list?ima=0000"
     )
 
+
     try:
 
         response = requests.get(
@@ -309,6 +302,7 @@ def get_hinatazaka_latest():
             headers=HEADERS,
             timeout=10
         )
+
 
         response.raise_for_status()
 
@@ -325,10 +319,6 @@ def get_hinatazaka_latest():
         )
 
 
-        blogs = []
-
-
-        # ブログ詳細URLを探す
         links = soup.find_all(
             "a",
             href=re.compile(
@@ -348,7 +338,6 @@ def get_hinatazaka_latest():
 
 
 
-        # 最新1件のみ
         link = links[0]
 
 
@@ -356,6 +345,7 @@ def get_hinatazaka_latest():
             list_url,
             link["href"]
         )
+
 
 
         detail = requests.get(
@@ -367,6 +357,7 @@ def get_hinatazaka_latest():
         detail.raise_for_status()
 
 
+
         detail_soup = BeautifulSoup(
             detail.text,
             "lxml"
@@ -374,9 +365,17 @@ def get_hinatazaka_latest():
 
 
         # 本文
+
         body = detail_soup.select_one(
             ".p-blog-detail__text"
         )
+
+
+        if not body:
+
+            body = detail_soup.select_one(
+                ".c-blog-detail__text"
+            )
 
 
         if not body:
@@ -386,12 +385,14 @@ def get_hinatazaka_latest():
             )
 
 
+
         # メンバー名
+
         member = ""
 
 
         member_tag = detail_soup.select_one(
-            ".p-blog-detail__name"
+            ".p-blog-detail__profile-name"
         )
 
 
@@ -404,11 +405,12 @@ def get_hinatazaka_latest():
 
 
         # タイトル
+
         title = ""
 
 
         title_tag = detail_soup.select_one(
-            "h1"
+            ".p-blog-detail__title"
         )
 
 
@@ -422,6 +424,7 @@ def get_hinatazaka_latest():
 
 
         # 日付
+
         date = ""
 
 
@@ -452,12 +455,12 @@ def get_hinatazaka_latest():
 
             "date": date,
 
-            "text": (
+            "text":
                 str(body)
                 if body else ""
-            )
 
         }
+
 
 
         print(
@@ -478,7 +481,6 @@ def get_hinatazaka_latest():
         )
 
         return []
-
 
 
 
