@@ -148,7 +148,7 @@ def get_nogizaka_latest():
 
 def get_sakurazaka_latest():
 
-    url = (
+    list_url = (
         "https://sakurazaka46.com"
         "/s/s46/diary/blog/list"
     )
@@ -156,22 +156,20 @@ def get_sakurazaka_latest():
 
     try:
 
+        # 一覧取得
         response = requests.get(
-            url,
+            list_url,
             headers=HEADERS,
             timeout=10
         )
 
-
         response.raise_for_status()
-
 
 
         soup = BeautifulSoup(
             response.text,
             "lxml"
         )
-
 
 
         article = soup.select_one(
@@ -201,7 +199,7 @@ def get_sakurazaka_latest():
 
 
         blog_url = urljoin(
-            url,
+            list_url,
             link["href"]
         )
 
@@ -217,9 +215,53 @@ def get_sakurazaka_latest():
         )
 
 
-        date = article.select_one(
+
+        # =====================
+        # 詳細ページ取得
+        # =====================
+
+        detail_response = requests.get(
+            blog_url,
+            headers=HEADERS,
+            timeout=10
+        )
+
+        detail_response.raise_for_status()
+
+
+        detail_soup = BeautifulSoup(
+            detail_response.text,
+            "lxml"
+        )
+
+
+        date = ""
+
+        # 候補1
+        date_tag = detail_soup.select_one(
             ".date"
         )
+
+
+        if date_tag:
+
+            date = date_tag.get_text(
+                strip=True
+            )
+
+
+        # 候補2 timeタグ
+        if not date:
+
+            time_tag = detail_soup.select_one(
+                "time"
+            )
+
+            if time_tag:
+
+                date = time_tag.get_text(
+                    strip=True
+                )
 
 
 
@@ -244,12 +286,7 @@ def get_sakurazaka_latest():
                 if title else ""
             ),
 
-            "date": (
-                date.get_text(
-                    strip=True
-                )
-                if date else ""
-            ),
+            "date": date,
 
             "text": ""
 
@@ -275,7 +312,6 @@ def get_sakurazaka_latest():
         )
 
         return None
-
 
 
 
