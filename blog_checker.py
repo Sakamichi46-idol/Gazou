@@ -62,7 +62,17 @@ def get_nogizaka_latest():
     data = json.loads(json_text)
 
 
-    print(data["data"][0])
+    blog = data["data"][0]
+
+
+    return {
+        "group": "乃木坂46",
+        "url": blog["link"],
+        "member": blog["name"],
+        "title": blog["title"],
+        "date": blog["date"],
+        "text": blog["text"]
+    }
 
 
     return None
