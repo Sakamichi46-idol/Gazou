@@ -426,20 +426,44 @@ def get_latest_blog():
     results = []
 
 
-    for func in [
+    funcs = [
+
         get_nogizaka_latest,
+
         get_sakurazaka_latest,
+
         get_hinatazaka_latest
-    ]:
+
+    ]
 
 
-        blog = func()
+    for func in funcs:
+
+        try:
+
+            blog = func()
 
 
-        if blog:
+            if isinstance(blog, dict):
 
-            results.append(
-                blog
+                results.append(
+                    blog
+                )
+
+
+            elif isinstance(blog, list):
+
+                results.extend(
+                    blog
+                )
+
+
+        except Exception as e:
+
+            print(
+                "取得エラー:",
+                func.__name__,
+                e
             )
 
 
