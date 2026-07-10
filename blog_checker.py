@@ -5,27 +5,51 @@ from urllib.parse import urljoin
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 "
-        "Chrome/120 Safari/537.36"
+        "(KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
     ),
+    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     "Referer": "https://www.nogizaka46.com/"
 }
 
 
 def get_nogizaka_latest():
 
-    url = "https://www.nogizaka46.com/s/n46/diary/MEMBER?ima=3331"
+    url = (
+        "https://www.nogizaka46.com/"
+        "s/n46/diary/MEMBER?ima=3331"
+    )
 
-    response = requests.get(
+
+    session = requests.Session()
+
+    session.headers.update(
+        HEADERS
+    )
+
+
+    response = session.get(
         url,
-        headers=HEADERS,
         timeout=10
     )
 
+
+    print(
+        "乃木坂 STATUS:",
+        response.status_code
+    )
+
+    print(
+        "乃木坂 URL:",
+        response.url
+    )
+
+
     response.raise_for_status()
-    print(response.text[:1000])
+
+
     soup = BeautifulSoup(
         response.text,
         "html.parser"
@@ -36,41 +60,66 @@ def get_nogizaka_latest():
         "a",
         class_="m--postone__a"
     )
-    print("乃木坂 post:", post)
+
+
+    print(
+        "乃木坂 post:",
+        post
+    )
+
 
     if not post:
         return None
+
 
 
     member = post.find(
         class_="m--postone__name"
     )
 
+
     title = post.find(
         class_="m--postone__ttl"
     )
+
 
     date = post.find(
         class_="m--postone__time"
     )
 
 
+    blog_url = post.get(
+        "href"
+    )
+
+
+    if blog_url:
+        blog_url = urljoin(
+            url,
+            blog_url
+        )
+
+
     return {
         "group": "乃木坂46",
-        "url": post.get("href"),
-        "member": member.get_text(strip=True)
-            if member else "",
-        "title": title.get_text(strip=True)
-            if title else "",
-        "date": date.get_text(strip=True)
+        "url": blog_url,
+        "member": (
+            member.get_text(strip=True)
+            if member else ""
+        ),
+        "title": (
+            title.get_text(strip=True)
+            if title else ""
+        ),
+        "date": (
+            date.get_text(strip=True)
             if date else ""
+        )
     }
 
 
 
 def get_sakurazaka_latest():
-
-    # ここに後で櫻坂用を書く
 
     return None
 
@@ -78,11 +127,7 @@ def get_sakurazaka_latest():
 
 def get_hinatazaka_latest():
 
-    # ここに後で日向坂用を書く
-
     return None
-
-
 
 
 
@@ -101,7 +146,9 @@ def get_latest_blog():
     for blog in blogs:
 
         if blog:
-            results.append(blog)
+            results.append(
+                blog
+            )
 
 
     return results
