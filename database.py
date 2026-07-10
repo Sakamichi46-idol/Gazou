@@ -3,7 +3,12 @@ import os
 from urllib.parse import urlparse
 
 
-DB_NAME = "/app/data/blogs.db"
+DB_DIR = "/app/data"
+DB_NAME = os.path.join(
+    DB_DIR,
+    "blogs.db"
+)
+
 
 
 def normalize_url(url):
@@ -24,13 +29,20 @@ def normalize_url(url):
 
 def init_db():
 
-    print("DB PATH:", DB_NAME)
-    print("DB EXISTS:", os.path.exists(DB_NAME))
-
-
     os.makedirs(
-        os.path.dirname(DB_NAME),
+        DB_DIR,
         exist_ok=True
+    )
+
+
+    print(
+        "DB PATH:",
+        DB_NAME
+    )
+
+    print(
+        "DB EXISTS:",
+        os.path.exists(DB_NAME)
     )
 
 
@@ -61,9 +73,7 @@ def init_db():
 
 def is_notified(url):
 
-    url = normalize_url(
-        url
-    )
+    url = normalize_url(url)
 
 
     conn = sqlite3.connect(
@@ -87,7 +97,6 @@ def is_notified(url):
 
     result = cur.fetchone()
 
-
     conn.close()
 
 
@@ -103,15 +112,7 @@ def save_blog(
     date
 ):
 
-    url = normalize_url(
-        url
-    )
-
-
-    print(
-        "DB INSERT開始:",
-        url
-    )
+    url = normalize_url(url)
 
 
     conn = sqlite3.connect(
@@ -144,12 +145,4 @@ def save_blog(
 
 
     conn.commit()
-
-
-    print(
-        "DB INSERT完了:",
-        url
-    )
-
-
     conn.close()
