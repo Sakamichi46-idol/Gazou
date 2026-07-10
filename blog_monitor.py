@@ -6,7 +6,7 @@ import discord
 
 from blog_checker import get_latest_blog
 from image_getter import get_images
-from config import BLOG_CHANNELS
+from config import BLOG_CHANNELS, ALL_BLOG_CHANNEL
 from database import is_notified, save_blog
 
 
@@ -17,7 +17,6 @@ async def send_images(channel, images):
 
         files = []
 
-
         for i, image_url in enumerate(
             images,
             start=1
@@ -26,10 +25,8 @@ async def send_images(channel, images):
             try:
 
                 async with session.get(
-                    image_url,
-                    timeout=15
+                    image_url
                 ) as resp:
-
 
                     if resp.status != 200:
                         continue
@@ -49,17 +46,16 @@ async def send_images(channel, images):
             except Exception as e:
 
                 print(
-                    "画像ダウンロードエラー:",
+                    "画像取得エラー:",
                     e
                 )
 
 
-
         if not files:
-
             return
 
 
+        # Discord添付上限10枚対策
 
         for start in range(
             0,
@@ -70,6 +66,37 @@ async def send_images(channel, images):
             await channel.send(
                 files=files[start:start + 10]
             )
+
+
+
+async def notify_channel(
+    channel,
+    blog,
+    images
+):
+
+    text = (
+        f"🏷️ {blog.get('group','')}\n"
+        f"👤 {blog.get('member','')}\n"
+        f"📝 {blog.get('title','')}\n"
+        f"📅 {blog.get('date','')}\n"
+        f"🔗 {blog.get('url','')}\n\n"
+        f"📷 ブログ画像 ({len(images)}枚)"
+    )
+
+
+    await channel.send(
+        text,
+        suppress_embeds=True
+    )
+
+
+    if images:
+
+        await send_images(
+            channel,
+            images
+        )
 
 
 
@@ -84,7 +111,8 @@ async def check_blog(bot):
 
             print(
                 "監視取得:",
-                blogs
+                len(blogs),
+                "件"
             )
 
 
@@ -101,209 +129,165 @@ async def check_blog(bot):
             for blog in blogs:
 
 
-                try:
-
-
-                    if not isinstance(
-                        blog,
-                        dict
-                    ):
-
-                        print(
-                            "不正データ:",
-                            blog
-                        )
-
-                        continue
-
-
-
-                    url = blog.get(
-                        "url"
-                    )
-
-
-                    if not url:
-
-                        continue
-
-
-
-                    # =====================
-                    # DB確認
-                    # =====================
-
-                    if is_notified(url):
-
-                        print(
-                            "通知済み:",
-                            url
-                        )
-
-                        continue
-
-
-
-                    group = blog.get(
-                        "group",
-                        ""
-                    )
-
-
-
-                    # =====================
-                    # DB保存
-                    # （最初に登録）
-                    # =====================
-
-                    save_blog(
-                        url,
-                        group,
-                        blog.get(
-                            "member",
-                            ""
-                        ),
-                        blog.get(
-                            "title",
-                            ""
-                        ),
-                        blog.get(
-                            "date",
-                            ""
-                        )
-                    )
-
+                if not isinstance(
+                    blog,
+                    dict
+                ):
 
                     print(
-                        "DB保存:",
+                        "不正データ:",
+                        blog
+                    )
+
+                    continue
+
+
+
+                url = blog.get(
+                    "url"
+                )
+
+
+                if not url:
+
+                    continue
+
+
+
+                # DB確認
+
+                if is_notified(
+                    url
+                ):
+
+                    print(
+                        "通知済み:",
                         url
                     )
 
+                    continue
 
 
-                    # =====================
-                    # チャンネル取得
-                    # =====================
 
-                    channel_id = BLOG_CHANNELS.get(
+                group = blog.get(
+                    "group",
+                    ""
+                )
+
+
+
+                # =========================
+                # 通知先作成
+                # =========================
+
+                channel_ids = list(
+                    BLOG_CHANNELS.get(
+                        group,
+                        []
+                    )
+                )
+
+
+                # 全体通知追加
+
+                if ALL_BLOG_CHANNEL:
+
+                    channel_ids.append(
+                        ALL_BLOG_CHANNEL
+                    )
+
+
+
+                if not channel_ids:
+
+                    print(
+                        "通知先なし:",
                         group
                     )
 
+                    continue
 
-                    if not channel_id:
+
+
+                # =========================
+                # DB保存
+                # =========================
+
+                save_blog(
+                    url,
+                    group,
+                    blog.get(
+                        "member",
+                        ""
+                    ),
+                    blog.get(
+                        "title",
+                        ""
+                    ),
+                    blog.get(
+                        "date",
+                        ""
+                    )
+                )
+
+
+
+                # =========================
+                # 画像取得
+                # =========================
+
+                detail = get_images(
+                    url
+                )
+
+
+                images = detail.get(
+                    "images",
+                    []
+                )
+
+
+                print(
+                    "画像取得:",
+                    len(images),
+                    "枚"
+                )
+
+
+
+                # =========================
+                # 複数チャンネル通知
+                # =========================
+
+                for channel_id in channel_ids:
+
+
+                    channel = bot.get_channel(
+                        channel_id
+                    )
+
+
+                    if not channel:
 
                         print(
-                            "チャンネルなし:",
-                            group
-                        )
-
-                        continue
-
-
-
-                    try:
-
-                        channel = bot.get_channel(
+                            "チャンネル取得失敗:",
                             channel_id
                         )
 
-
-                        if channel is None:
-
-                            channel = await bot.fetch_channel(
-                                channel_id
-                            )
-
-
-                    except Exception as e:
-
-                        print(
-                            "チャンネル取得エラー:",
-                            e
-                        )
-
                         continue
 
 
 
-                    # =====================
-                    # 画像取得
-                    # =====================
-
-                    try:
-
-                        detail = get_images(
-                            url
-                        )
-
-
-                    except Exception as e:
-
-                        print(
-                            "画像取得処理エラー:",
-                            e
-                        )
-
-                        detail = {
-                            "images": []
-                        }
-
-
-
-                    images = detail.get(
-                        "images",
-                        []
+                    await notify_channel(
+                        channel,
+                        blog,
+                        images
                     )
 
-
-
-                    # =====================
-                    # 通知文章
-                    # =====================
-
-                    text = (
-                        f"🏷️ {group}\n"
-                        f"👤 {blog.get('member','')}\n"
-                        f"📝 {blog.get('title','')}\n"
-                        f"📅 {blog.get('date','')}\n"
-                        f"🔗 {url}\n\n"
-                        f"📷 ブログ画像 ({len(images)}枚)"
-                    )
-
-
-
-                    await channel.send(
-                        text,
-                        suppress_embeds=True
-                    )
-
-
-
-                    # =====================
-                    # 画像送信
-                    # =====================
-
-                    if images:
-
-                        await send_images(
-                            channel,
-                            images
-                        )
-
-                    else:
-
-                        print(
-                            "画像なし:",
-                            url
-                        )
-
-
-
-                except Exception as e:
 
                     print(
-                        "ブログ1件処理エラー:",
-                        e
+                        "通知完了:",
+                        channel_id
                     )
 
 
