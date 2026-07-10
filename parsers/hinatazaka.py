@@ -2,6 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
+from parsers.utils import normalize_datetime
+
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
@@ -20,8 +22,15 @@ def get_hinatazaka_images(url):
         response.raise_for_status()
 
     except Exception as e:
-        print("日向坂画像取得エラー:", e)
-        return []
+        print("日向坂取得エラー:", e)
+        return {
+            "group": "日向坂46",
+            "member": "",
+            "title": "",
+            "date": "",
+            "url": url,
+            "images": []
+        }
 
 
     soup = BeautifulSoup(
@@ -30,53 +39,120 @@ def get_hinatazaka_images(url):
     )
 
 
+    blog = {
+        "group": "日向坂46",
+        "member": "",
+        "title": "",
+        "date": "",
+        "url": url,
+        "images": []
+    }
+
+
+    # タイトル
+    title = soup.find(
+        "h1"
+    )
+
+    if title:
+        blog["title"] = title.get_text(
+            strip=True
+        )
+
+
+    # メンバー名
+    member = soup.select_one(
+        ".p-blog-article__name"
+    )
+
+    if not member:
+        member = soup.select_one(
+            ".c-blog-article__name"
+        )
+
+
+    if member:
+        blog["member"] = member.get_text(
+            strip=True
+        )
+
+
+    # 投稿日
+    date = soup.find(
+        "time"
+    )
+
+    if date:
+
+        date_text = (
+            date.get("datetime")
+            or date.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        blog["date"] = normalize_datetime(
+            date_text
+        )
+
+
+
     # 本文部分
     article = soup.select_one(
         ".c-blog-article__text"
     )
 
+
     if not article:
-        print("日向坂本文が見つかりません")
-        return []
+        article = soup
 
 
-    images = []
+    seen = set()
 
+
+    # 画像取得
     for img in article.find_all("img"):
 
         src = img.get("src")
+
 
         if not src:
             continue
 
 
-        # 相対URL対応
         img_url = urljoin(
             url,
             src
         )
 
 
-        # ロゴなど除外
+        # 日向坂ブログ画像のみ
+        if "/files/14/diary/official/member/" not in img_url:
+            continue
+
+
+        # ロゴ除外
         if "logo" in img_url.lower():
             continue
 
 
-        images.append(img_url)
+        # 重複削除
+        if img_url in seen:
+            continue
 
 
-    # 重複削除
-    images = list(
-        dict.fromkeys(images)
-    )
+        seen.add(img_url)
+
+
+        blog["images"].append(
+            img_url
+        )
 
 
     print(
-        f"日向坂画像数: {len(images)}"
+        f"日向坂画像数: {len(blog['images'])}"
     )
 
-    for i in images:
-        print(i)
 
-
-    return images
+    return blog
