@@ -1,15 +1,13 @@
 import asyncio
 
 from blog_checker import get_latest_blog
+from config import BLOG_CHANNELS
 
 
-last_blog = None
+last_urls = {}
 
 
-async def check_blog(bot, channel_id):
-
-    global last_blog
-
+async def check_blog(bot):
 
     while True:
 
@@ -18,17 +16,33 @@ async def check_blog(bot, channel_id):
             blogs = get_latest_blog()
 
 
-            if blogs:
+            for blog in blogs:
 
-                blog = blogs[0]
+                group = blog["group"]
+
+                url = blog["url"]
 
 
-                current_url = blog["url"]
+                # 初回登録
+                if group not in last_urls:
+
+                    last_urls[group] = url
+                    continue
 
 
-                if current_url != last_blog:
+                # 新記事の場合
+                if url != last_urls[group]:
 
-                    last_blog = current_url
+                    last_urls[group] = url
+
+
+                    channel_id = BLOG_CHANNELS.get(
+                        group
+                    )
+
+
+                    if not channel_id:
+                        continue
 
 
                     channel = bot.get_channel(
@@ -55,7 +69,6 @@ async def check_blog(bot, channel_id):
             )
 
 
-        # 10分ごと
         await asyncio.sleep(
             600
-)
+                    )
