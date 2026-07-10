@@ -9,7 +9,17 @@ from image_getter import get_images
 from config import BLOG_CHANNELS
 from database import is_notified, save_blog
 
+blogs = get_latest_blog()
 
+print(
+    "TYPE:",
+    type(blogs)
+)
+
+print(
+    "BLOG TYPE:",
+    type(blogs[0])
+)
 
 async def send_images(channel, images):
 
