@@ -20,6 +20,7 @@ def get_sakurazaka_images(url):
 
     response.raise_for_status()
 
+
     soup = BeautifulSoup(
         response.text,
         "html.parser"
@@ -31,6 +32,7 @@ def get_sakurazaka_images(url):
         "member": "",
         "title": "",
         "date": "",
+        "url": url,
         "images": []
     }
 
@@ -43,6 +45,7 @@ def get_sakurazaka_images(url):
 
     if not title:
         title = soup.find("h1")
+
 
     if title:
         blog["title"] = title.get_text(
@@ -70,7 +73,7 @@ def get_sakurazaka_images(url):
             )
 
 
-        # 投稿日時
+        # 投稿日
         date = blog_foot.find(
             "p",
             class_="date"
@@ -93,8 +96,12 @@ def get_sakurazaka_images(url):
         or soup.find(
             class_="bd--edit"
         )
-        or soup.find("article")
-        or soup.find("main")
+        or soup.find(
+            "article"
+        )
+        or soup.find(
+            "main"
+        )
     )
 
 
@@ -102,35 +109,41 @@ def get_sakurazaka_images(url):
         article = soup
 
 
+
     seen = set()
 
 
+    # 画像取得
     for img in article.find_all("img"):
 
         src = img.get("src")
+
 
         if not src:
             continue
 
 
-        src = urljoin(
+        image_url = urljoin(
             url,
             src
         )
 
 
         # 櫻坂ブログ画像のみ
-        if "/files/" not in src:
+        if "/files/14/diary/s46/" not in image_url:
             continue
 
 
-        if src in seen:
+        if image_url in seen:
             continue
 
 
-        seen.add(src)
+        seen.add(image_url)
 
-        blog["images"].append(src)
+
+        blog["images"].append(
+            image_url
+        )
 
 
     return blog
