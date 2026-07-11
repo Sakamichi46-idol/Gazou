@@ -154,27 +154,47 @@ async def get_blog_urls(session):
 
     return urls
 
-# 💡 非同期関数に変更
-async def get_oldest_first():
-    blogs = []
-    
-    # セッションを作成して使い回す
-    async with aiohttp.ClientSession() as session:
-        # 💡 await をつけてURLリストを取得
-        urls = await get_blog_urls(session)
+async def get_oldest_first(session):
 
-        for url in urls:
-            # 💡 await をつけて個別ページからデータを取得
-            blog_data = await get_sakurazaka_images(session, url)
-            blogs.append({
+    blogs = []
+
+
+    urls = await get_blog_urls(
+        session
+    )
+
+
+    for url in urls:
+
+        blog_data = await get_sakurazaka_images(
+            session,
+            url
+        )
+
+
+        blogs.append(
+            {
                 "group": blog_data["group"],
                 "url": blog_data["url"],
                 "member": blog_data["member"],
                 "title": blog_data["title"],
                 "date": blog_data["date"]
-            })
-            # 💡 ここでも少し待機を入れると安全
-            await asyncio.sleep(0.5)
+            }
+        )
 
-    blogs.sort(key=lambda x: x.get("date", ""))
+
+        await asyncio.sleep(
+            0.5
+        )
+
+
+
+    blogs.sort(
+        key=lambda x: x.get(
+            "date",
+            ""
+        )
+    )
+
+
     return blogs
