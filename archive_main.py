@@ -86,7 +86,7 @@ async def download_image(
 
                 return discord.File(
                     io.BytesIO(data),
-                    filename=f"image_{index}.jpg"  # 💡 何枚目かわかるように番号を付与
+                    filename=f"image_{index}.jpg"
                 )
 
     except Exception as e:
@@ -217,6 +217,10 @@ async def archive_loop():
         )
         return
 
+    # 💡 【カスタム】取得した新着ブログを、日付（date）の古い順に並び替える
+    # 2026年07月11日 20:30 のような文字列でも、そのまま昇順で古い順ソートが可能です
+    blogs.sort(key=lambda x: x.get("date", ""))
+
     for blog in blogs:
         try:
             member = blog.get(
@@ -255,13 +259,13 @@ async def archive_loop():
                 text=f"Archive BOT • 画像総数: {len(image_urls)}枚"
             )
 
-            # 💡 各ターゲットチャンネルごとに処理を行う
+            # 各ターゲットチャンネルごとに処理を行う
             for channel in channels:
-                # 【カスタム①】先にEmbed（テキストカード）だけを投稿
+                # 先にEmbed（テキストカード）だけを投稿
                 await channel.send(embed=embed)
                 await asyncio.sleep(SEND_DELAY)
 
-                # 【カスタム②】画像をすべてダウンロードして投稿（上限なし）
+                # 画像をすべてダウンロードして投稿（上限なし）
                 if image_urls:
                     files = []
                     for index, url in enumerate(image_urls, start=1):
@@ -272,10 +276,9 @@ async def archive_loop():
                         # Discordは一度に最大10枚しかファイルを添付できないため、10枚溜まるごとに送信
                         if len(files) == 10:
                             await channel.send(files=files)
-                            files = []  # リストを空にする
+                            files = []
                             await asyncio.sleep(SEND_DELAY)
 
-                    # 10枚に満たなかった残りの画像があれば最後に送信
                     if files:
                         await channel.send(files=files)
                         await asyncio.sleep(SEND_DELAY)
