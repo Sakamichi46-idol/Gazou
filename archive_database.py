@@ -7,9 +7,7 @@ import sqlite3
 # =========================
 
 DB_DIR = "data"
-
 DB_NAME = "archive.db"
-
 
 os.makedirs(
     DB_DIR,
@@ -29,10 +27,8 @@ print(
 
 
 
-
-
 # =========================
-# DB初期化
+# 初期化
 # =========================
 
 def init_archive_db():
@@ -46,18 +42,13 @@ def init_archive_db():
 
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS archive (
-
+        CREATE TABLE IF NOT EXISTS archive
+        (
             url TEXT PRIMARY KEY,
-
             group_name TEXT,
-
             member TEXT,
-
             title TEXT,
-
             date TEXT
-
         )
         """
     )
@@ -69,15 +60,11 @@ def init_archive_db():
 
 
 
-
-
 # =========================
 # 登録済み確認
 # =========================
 
-def is_archived(
-    url
-):
+def is_archived(url):
 
     conn = sqlite3.connect(
         DB_PATH
@@ -108,8 +95,6 @@ def is_archived(
 
 
 
-
-
 # =========================
 # 保存
 # =========================
@@ -129,7 +114,6 @@ def save_archive(
     cur = conn.cursor()
 
 
-
     cur.execute(
         """
         INSERT OR IGNORE INTO archive
@@ -140,10 +124,8 @@ def save_archive(
             title,
             date
         )
-
         VALUES
         (?, ?, ?, ?, ?)
-
         """,
         (
             url,
@@ -158,49 +140,6 @@ def save_archive(
     conn.commit()
 
     conn.close()
-
-
-
-
-
-# =========================
-# archive_main.py用
-# =========================
-
-def mark_archived(
-    blog
-):
-
-    save_archive(
-
-        blog.get(
-            "group",
-            ""
-        ),
-
-        blog.get(
-            "member",
-            ""
-        ),
-
-        blog.get(
-            "title",
-            ""
-        ),
-
-        blog.get(
-            "date",
-            ""
-        ),
-
-        blog.get(
-            "url",
-            ""
-        )
-
-    )
-
-
 
 
 
