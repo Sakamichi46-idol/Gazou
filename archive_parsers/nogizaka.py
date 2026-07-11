@@ -11,38 +11,31 @@ HEADERS = {
 member_cache = {}
 
 async def update_member_cache(session):
-    """メンバー一覧ページからリンクを全走査して辞書を構築（デバッグ用）"""
+    """ブログリストページのプルダウンからメンバー辞書を構築"""
     try:
-        url = "https://www.nogizaka46.com/s/n46/artist"
-        print(f"[デバッグ] 接続先: {url}")
+        # メンバーブログ一覧ページ
+        url = "https://www.nogizaka46.com/s/n46/diary/MEMBER/list"
         async with session.get(url, headers=HEADERS) as resp:
             html = await resp.text()
             soup = BeautifulSoup(html, "html.parser")
             
-            # 全リンクを抽出して「ct=」が含まれるものを確認
-            all_links = soup.find_all("a", href=True)
-            ct_links = [a for a in all_links if "ct=" in a.get("href", "")]
+            # ページ内のすべてのoptionタグを抽出
+            options = soup.select("select option")
+            print(f"[デバッグ] 見つかったoptionタグの数: {len(options)}")
             
-            print(f"[デバッグ] ページ内のリンク総数: {len(all_links)}")
-            print(f"[デバッグ] ct=を含むリンク数: {len(ct_links)}")
-            
-            for link in ct_links:
-                href = link.get("href", "")
-                name = link.get_text(strip=True)
+            for opt in options:
+                val = opt.get("value", "")
+                name = opt.get_text(strip=True)
                 
-                # ミーグリや無関係なリンクを除外
-                if "HANDSHAKE" in href or "ticket" in href or not name:
-                    continue
+                # ログに出力して中身を確認
+                print(f"[デバッグ] option解析: name='{name}', value='{val}'")
                 
-                query = urlparse(href).query
-                ct = parse_qs(query).get("ct", [None])[0]
-                
-                if ct:
-                    member_cache[ct] = name
-            
-            # デバッグ用に全件表示してみる
-            for ct, name in member_cache.items():
-                print(f"[デバッグ] 辞書登録: {name} (ct={ct})")
+                # ctパラメータを持ち、かつ無効な選択肢を除外して辞書に登録
+                if "ct=" in val:
+                    ct = parse_qs(urlparse(val).query).get("ct", [None])[0]
+                    # 除外条件：グループ名そのものや「選択してください」などを排除
+                    if ct and "メンバー" not in name and "選択" not in name and "乃木坂" not in name:
+                        member_cache[ct] = name
         
         print(f"乃木坂46 メンバー辞書を更新: {len(member_cache)}名")
     except Exception as e:
@@ -51,15 +44,14 @@ async def update_member_cache(session):
 async def get_all_blog_urls(session):
     """全ブログ記事のURLを収集する"""
     print("乃木坂46 全ブログ記事URLを収集します...")
+    # ここにメンバーごとのページを回るロジックが必要です
     return []
 
 async def get_blog_list(session):
     await update_member_cache(session)
     urls = await get_all_blog_urls(session)
     blogs = []
-    for url in urls:
-        # ... (既存ロジック)
-        pass
+    # 記事取得ロジック
     return blogs
 
 async def get_oldest_first():
