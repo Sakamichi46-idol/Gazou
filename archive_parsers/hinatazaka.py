@@ -386,9 +386,9 @@ async def get_blog_list(session):
 # 外部呼び出し
 # =========================
 
-async def get_oldest_first():
+async def get_oldest_first(session):
 
-    async with aiohttp.ClientSession() as session:
+    
 
         blogs = await get_blog_list(
             session
