@@ -154,12 +154,12 @@ async def get_blog_urls(session):
 
     return urls
 
-async def get_oldest_first():
+async def get_oldest_first(session):
 
     blogs = []
 
 
-    async with aiohttp.ClientSession() as session:
+    
 
 
         urls = await get_blog_urls(
