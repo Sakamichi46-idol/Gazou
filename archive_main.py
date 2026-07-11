@@ -1,8 +1,11 @@
 import os
 import asyncio
+import io
 
 import discord
 from discord.ext import commands, tasks
+
+import aiohttp
 
 
 from archive_checker import (
@@ -10,6 +13,9 @@ from archive_checker import (
     mark_archived
 )
 
+from archive_image_getter import (
+    get_images
+)
 
 from keep_alive import keep_alive
 
@@ -39,14 +45,52 @@ ARCHIVE_CHANNELS = {
 
     # 例
     # "遠藤さくら": 123456789012345678,
-    # "山下葉留花": 123456789012345678,
 
 }
 
 
 
 # =========================
-# 起動時
+# 画像ダウンロード
+# =========================
+
+
+async def download_image(url):
+
+    try:
+
+        async with aiohttp.ClientSession() as session:
+
+            async with session.get(
+                url,
+                timeout=20
+            ) as response:
+
+
+                data = await response.read()
+
+
+                return discord.File(
+                    io.BytesIO(data),
+                    filename="image.jpg"
+                )
+
+
+    except Exception as e:
+
+        print(
+            "画像DLエラー:",
+            e
+        )
+
+
+        return None
+
+
+
+
+# =========================
+# 起動
 # =========================
 
 
@@ -62,6 +106,8 @@ async def on_ready():
 
 
 
+
+
 # =========================
 # アーカイブ処理
 # =========================
@@ -73,11 +119,6 @@ async def on_ready():
 async def archive_loop():
 
 
-    print(
-        "アーカイブ確認開始"
-    )
-
-
     blogs = get_archive_targets()
 
 
@@ -85,7 +126,7 @@ async def archive_loop():
     if not blogs:
 
         print(
-            "対象なし"
+            "アーカイブ対象なし"
         )
 
         return
@@ -132,6 +173,32 @@ async def archive_loop():
 
 
 
+            images = get_images(
+                blog["url"]
+            )
+
+
+
+            files = []
+
+
+
+            for image_url in images[:5]:
+
+
+                file = await download_image(
+                    image_url
+                )
+
+
+                if file:
+
+                    files.append(
+                        file
+                    )
+
+
+
             embed = discord.Embed(
 
                 title=blog.get(
@@ -156,6 +223,7 @@ async def archive_loop():
             )
 
 
+
             embed.set_author(
                 name=member
             )
@@ -163,7 +231,11 @@ async def archive_loop():
 
 
             await channel.send(
-                embed=embed
+
+                embed=embed,
+
+                files=files
+
             )
 
 
@@ -184,7 +256,7 @@ async def archive_loop():
 
 
             print(
-                "投稿エラー:",
+                "アーカイブ処理エラー:",
                 e
             )
 
