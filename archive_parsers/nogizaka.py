@@ -128,6 +128,10 @@ async def get_all_blog_urls(session):
             ) as response:
 
                 html = await response.text()
+                print(
+                    "乃木坂HTML確認:",
+                    html[:500]
+                )
 
 
 
