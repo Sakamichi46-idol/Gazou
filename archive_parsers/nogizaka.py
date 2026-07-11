@@ -1,6 +1,11 @@
-import asyncio
+import aiohttp
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
+
+# 定数設定
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 
 # メンバー辞書（ハードコード）
 MEMBER_CT_MAP = {
@@ -40,7 +45,7 @@ def get_member_name_from_blog(ct, title):
     if ct in MEMBER_CT_MAP:
         return MEMBER_CT_MAP[ct]
     
-    # 期生ブログの場合、タイトルから検索
+    # 期生ブログの場合、タイトルからメンバー名を検索
     if ct in GROUP_CT_MAP:
         for name in MEMBER_CT_MAP.values():
             if name in title:
@@ -49,20 +54,49 @@ def get_member_name_from_blog(ct, title):
 
 async def get_all_blog_urls(session):
     """全ブログ記事のURLを収集する"""
-    print("[デバッグ] 記事収集開始...")
-    urls = []
-    # ここに各メンバーページ(ct)ごとの巡回ロジックが必要です
-    # 例: for ct in member_cache.keys(): ...
-    return urls
+    print("[デバッグ] 乃木坂46 記事収集開始...")
+    all_blogs = []
+    
+    for ct, name in member_cache.items():
+        if ct == "40003": continue # 運営除外
+            
+        url = f"https://www.nogizaka46.com/s/n46/diary/MEMBER/list?ct={ct}"
+        try:
+            async with session.get(url, headers=HEADERS) as resp:
+                html = await resp.text()
+                soup = BeautifulSoup(html, "html.parser")
+                
+                # 記事一覧の取得
+                posts = soup.select("div.m--postone")
+                for post in posts:
+                    a_tag = post.select_one("a.m--postone__a")
+                    time_tag = post.select_one("p.m--postone__time")
+                    title_tag = post.select_one("p.m--postone__ttl")
+                    
+                    if a_tag and time_tag and title_tag:
+                        post_url = a_tag.get("href")
+                        post_time = time_tag.get_text(strip=True)
+                        post_title = title_tag.get_text(strip=True)
+                        
+                        target_name = get_member_name_from_blog(ct, post_title)
+                        if target_name:
+                            all_blogs.append({
+                                "url": post_url,
+                                "date": post_time,
+                                "title": post_title,
+                                "member": target_name
+                            })
+        except Exception as e:
+            print(f"エラー: {name} の取得中にエラー発生: {e}")
+            
+    return all_blogs
 
 async def get_blog_list(session):
     """辞書更新と記事取得を実行"""
     await update_member_cache(session)
-    urls = await get_all_blog_urls(session)
-    return urls
+    return await get_all_blog_urls(session)
 
 async def get_oldest_first():
-    # 他のモジュールから呼び出されるメイン関数
-    import aiohttp
+    """他モジュールから呼び出されるエントリーポイント"""
     async with aiohttp.ClientSession() as session:
         return await get_blog_list(session)
