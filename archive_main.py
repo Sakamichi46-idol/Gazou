@@ -8,15 +8,23 @@ from discord.ext import commands, tasks
 
 
 from archive_checker import (
-    get_archive_targets,
+    get_archive_targets
+)
+
+
+from archive_database import (
+    init_archive_db,
     mark_archived
 )
+
 
 from archive_image_getter import (
     get_images
 )
 
+
 from keep_alive import keep_alive
+
 
 
 
@@ -39,6 +47,7 @@ bot = commands.Bot(
 
 
 
+
 # =========================
 # チャンネル設定
 # =========================
@@ -49,9 +58,11 @@ ARCHIVE_ALL_CHANNEL = 1524064741016862883
 
 
 
+
 # メンバー別アーカイブチャンネル
 
 ARCHIVE_MEMBER_CHANNELS = {
+
 
     # 例
     #
@@ -61,7 +72,9 @@ ARCHIVE_MEMBER_CHANNELS = {
     # "賀喜遥香":
     #     123456789012345678,
 
+
 }
+
 
 
 
@@ -93,14 +106,18 @@ async def download_image(
                 )
 
 
+
     except Exception as e:
+
 
         print(
             "画像ダウンロードエラー:",
             e
         )
 
+
         return None
+
 
 
 
@@ -111,9 +128,6 @@ async def create_files(
 
     files = []
 
-
-    # Discord制限対策
-    # 最大5枚
 
     for url in image_urls[:5]:
 
@@ -149,7 +163,7 @@ def get_channels(
 
 
 
-    # 全体チャンネル
+    # 全体アーカイブ
 
     if ARCHIVE_ALL_CHANNEL:
 
@@ -167,14 +181,14 @@ def get_channels(
 
 
 
-    # 個別チャンネル
+
+    # メンバー別
 
     member_channel_id = (
         ARCHIVE_MEMBER_CHANNELS.get(
             member
         )
     )
-
 
 
     if member_channel_id:
@@ -213,6 +227,13 @@ async def on_ready():
     )
 
 
+
+    # archive.db作成
+
+    init_archive_db()
+
+
+
     if not archive_loop.is_running():
 
         archive_loop.start()
@@ -237,6 +258,7 @@ async def archive_loop():
     )
 
 
+
     blogs = get_archive_targets()
 
 
@@ -247,6 +269,7 @@ async def archive_loop():
         print(
             "対象なし"
         )
+
 
         return
 
@@ -286,6 +309,7 @@ async def archive_loop():
 
 
 
+
             # 画像取得
 
             image_urls = get_images(
@@ -297,6 +321,7 @@ async def archive_loop():
             files = await create_files(
                 image_urls
             )
+
 
 
 
@@ -338,6 +363,7 @@ async def archive_loop():
 
 
 
+
             # 全体＋個別へ送信
 
             for channel in channels:
@@ -358,7 +384,9 @@ async def archive_loop():
 
 
 
-            # DB保存
+
+
+            # archive.db保存
 
             mark_archived(
                 blog
@@ -369,7 +397,8 @@ async def archive_loop():
             print(
                 "アーカイブ完了:",
                 blog.get(
-                    "title"
+                    "title",
+                    ""
                 )
             )
 
@@ -389,6 +418,7 @@ async def archive_loop():
                 "アーカイブエラー:",
                 e
             )
+
 
 
 
