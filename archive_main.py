@@ -36,7 +36,6 @@ TOKEN = os.getenv(
 )
 
 
-# 💡 【カスタム】メッセージ内容の取得権限を追加し、警告を消しました
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -165,7 +164,7 @@ def get_channels(
 
 
 # =========================
-# 起動
+# 起動・管理コマンド
 # =========================
 
 @bot.event
@@ -180,6 +179,44 @@ async def on_ready():
     if not archive_loop.is_running():
         archive_loop.start()
 
+
+# 💡 【カスタム】アーカイブを一時停止するコマンド
+@bot.command()
+@commands.is_owner()  # コマンド作成者（あなた）だけが実行可能
+async def archive_stop(ctx):
+    if archive_loop.is_running():
+        archive_loop.cancel()
+        await ctx.send("🛑 ブログアーカイブの自動巡回を【一時停止】しました。")
+    else:
+        await ctx.send("⚠️ アーカイブは既に停止しています。")
+
+
+# 💡 【カスタム】アーカイブを再開するコマンド
+@bot.command()
+@commands.is_owner()
+async def archive_start(ctx):
+    if not archive_loop.is_running():
+        archive_loop.start()
+        await ctx.send("▶️ ブログアーカイブの自動巡回を【再開】しました。")
+    else:
+        await ctx.send("⚠️ アーカイブは既に動作中です。")
+
+
+# 💡 【カスタム】現在の動作状態を確認するコマンド
+@bot.command()
+async def archive_status(ctx):
+    if archive_loop.is_running():
+        await ctx.send("🟢 現在、アーカイブ自動監視は【稼働中】です。")
+    else:
+        await ctx.send("🔴 現在、アーカイブ自動監視は【停止中】です。")
+
+
+# エラーハンドリング（管理者以外の実行を弾いたときのメッセージ）
+@archive_stop.error
+@archive_start.error
+async def archive_command_error(ctx, error):
+    if isinstance(error, commands.NotOwner):
+        await ctx.send("❌ このコマンドはBotの管理者のみ実行できます。")
 
 
 
@@ -227,23 +264,16 @@ async def archive_loop():
                 blog["url"]
             )
 
-            # 💡 【カスタム】1枚目の画像をEmbed（埋め込み）内に大きく表示させるための設定
-            first_image_url = image_urls[0] if image_urls else None
-
-            # 💡 【カスタム】表示形式をリッチにデザイン
+            # テキスト情報（グループ、メンバー、日時、タイトル）をEmbedに整理
             embed = discord.Embed(
                 title=blog.get("title", "無題"),
                 url=blog.get("url", ""),
                 color=0x00aaff
             )
 
-            # グループ名、メンバー名、投稿日時（時間込み）を綺麗に並べる
             embed.add_field(name="🏷️ グループ", value=blog.get("group", "不明"), inline=True)
             embed.add_field(name="👤 メンバー", value=member if member else "不明", inline=True)
             embed.add_field(name="📅 投稿日時", value=blog.get("date", "不明"), inline=False)
-
-            if first_image_url:
-                embed.set_image(url=first_image_url)
 
             embed.set_footer(
                 text=f"Archive BOT • 画像総数: {len(image_urls)}枚"
@@ -251,15 +281,13 @@ async def archive_loop():
 
             # 全体＋個別へ送信
             for channel in channels:
-                # 2枚目以降の画像がある場合はファイルとして添付する準備
-                other_files = []
-                if len(image_urls) > 1:
-                    other_files = await create_files(image_urls[1:])
+                send_files = []
+                if image_urls:
+                    send_files = await create_files(image_urls)
 
-                # 送信実行（Embedとファイルを一緒に送る）
                 await channel.send(
                     embed=embed,
-                    files=other_files
+                    files=send_files
                 )
 
                 await asyncio.sleep(
