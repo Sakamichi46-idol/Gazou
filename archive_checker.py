@@ -95,3 +95,12 @@ async def get_all_blogs():
 
 
     return blogs
+
+
+# =========================
+# archive_main用
+# =========================
+
+async def get_archive_targets():
+
+    return await get_all_blogs()
