@@ -1,4 +1,5 @@
 import asyncio
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
 
 # メンバー辞書（ハードコード）
@@ -29,38 +30,39 @@ async def update_member_cache(session=None):
     member_cache.clear()
     member_cache.update(MEMBER_CT_MAP)
     member_cache.update(GROUP_CT_MAP)
-    print(f"乃木坂46 辞書を固定値で更新: {len(member_cache)}件")
+    print(f"[デバッグ] 乃木坂46 辞書更新完了。全{len(member_cache)}件")
 
 def get_member_name_from_blog(ct, title):
-    """
-    ctに基づきメンバー名を判定。
-    期生グループの場合はタイトルから名前を抽出する。
-    """
-    # 運営スタッフ(40003)は除外
-    if ct == "40003":
-        return None
+    """ctとタイトルからメンバー名を判定"""
+    if ct == "40003": return None  # 運営は除外
     
     # 個人ブログの場合
     if ct in MEMBER_CT_MAP:
         return MEMBER_CT_MAP[ct]
     
-    # 期生ブログの場合、タイトルからメンバー名を検索
+    # 期生ブログの場合、タイトルから検索
     if ct in GROUP_CT_MAP:
         for name in MEMBER_CT_MAP.values():
             if name in title:
                 return name
-                
     return None
 
+async def get_all_blog_urls(session):
+    """全ブログ記事のURLを収集する"""
+    print("[デバッグ] 記事収集開始...")
+    urls = []
+    # ここに各メンバーページ(ct)ごとの巡回ロジックが必要です
+    # 例: for ct in member_cache.keys(): ...
+    return urls
+
 async def get_blog_list(session):
+    """辞書更新と記事取得を実行"""
     await update_member_cache(session)
-    # 記事取得の巡回ロジックをここに実装
-    blogs = []
-    # 例: 記事を取得した際に以下のように判定する
-    # name = get_member_name_from_blog(ct, blog_title)
-    # if name: ...
-    return blogs
+    urls = await get_all_blog_urls(session)
+    return urls
 
 async def get_oldest_first():
-    # 実行用メイン関数
-    return []
+    # 他のモジュールから呼び出されるメイン関数
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        return await get_blog_list(session)
