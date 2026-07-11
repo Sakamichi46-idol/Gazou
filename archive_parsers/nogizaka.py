@@ -1,62 +1,66 @@
 import asyncio
-import aiohttp
-from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
-from archive_parsers.utils import normalize_datetime
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# メンバー辞書（ハードコード）
+MEMBER_CT_MAP = {
+    "55396": "五百城 茉央", "55397": "池田 瑛紗", "55390": "一ノ瀬 美空",
+    "36749": "伊藤 理々杏", "55389": "井上 和", "36750": "岩本 蓮加",
+    "48006": "遠藤 さくら", "63102": "大越 ひなの", "55401": "岡本 姫奈",
+    "55392": "小川 彩", "55394": "奥田 いろは", "63103": "小津 玲奈",
+    "63104": "海邉 朱莉", "48008": "賀喜 遥香", "48010": "金川 紗耶",
+    "55400": "川﨑 桜", "63105": "川端 晃菜", "55383": "黒見 明香",
+    "48013": "柴田 柚菜", "55391": "菅原 咲月", "63106": "鈴木 佑捺",
+    "63107": "瀬戸口 心月", "48015": "田村 真佑", "48017": "筒井 あやめ",
+    "55393": "冨里 奈央", "63108": "長嶋 凛桜", "55395": "中西 アルノ",
+    "55385": "林 瑠奈", "63109": "増田 三莉音", "63110": "森平 麗心",
+    "63111": "矢田 萌華", "55387": "弓木 奈於", "36759": "吉田 綾乃クリスティー"
+}
+
+# 期生グループID
+GROUP_CT_MAP = {
+    "40004": "３期生", "40005": "４期生", 
+    "40001": "新4期生", "40007": "5期生", "40008": "6期生"
 }
 
 member_cache = {}
 
-async def update_member_cache(session):
-    """HTML構造に最適化したメンバー辞書構築ロジック"""
-    try:
-        url = "https://www.nogizaka46.com/s/n46/diary/MEMBER/list"
-        async with session.get(url, headers=HEADERS) as resp:
-            html = await resp.text()
-            soup = BeautifulSoup(html, "html.parser")
-            
-            # ご提示いただいた構造に基づき div.ba--mmsel__pc__one を抽出
-            member_divs = soup.select("div.ba--mmsel__pc__one")
-            
-            # 除外対象のリスト
-            exclude_names = ["運営スタッフ", "３期生", "４期生", "新4期生", "5期生", "6期生"]
-            
-            for div in member_divs:
-                a_tag = div.select_one("a.ba--mmsel__pc__a")
-                p_tag = div.select_one("p.ba--mmsel__pc__neme")
-                
-                if a_tag and p_tag:
-                    href = a_tag.get("href", "")
-                    name = p_tag.get_text(strip=True)
-                    
-                    # ct番号を抽出
-                    query = urlparse(href).query
-                    ct = parse_qs(query).get("ct", [None])[0]
-                    
-                    # メンバーのみを辞書に登録
-                    if ct and name and name not in exclude_names:
-                        member_cache[ct] = name
-            
-            print(f"乃木坂46 メンバー辞書を更新: {len(member_cache)}名")
-            for ct, name in member_cache.items():
-                print(f"  [登録] {name} (ct={ct})")
-                
-    except Exception as e:
-        print(f"メンバー辞書更新エラー: {e}")
+async def update_member_cache(session=None):
+    """固定の辞書データでキャッシュを更新"""
+    member_cache.clear()
+    member_cache.update(MEMBER_CT_MAP)
+    member_cache.update(GROUP_CT_MAP)
+    print(f"乃木坂46 辞書を固定値で更新: {len(member_cache)}件")
 
-async def get_all_blog_urls(session):
-    """全ブログ記事のURLを収集する"""
-    # 実際にはここに各メンバーのブログリストを巡回するロジックが入ります
-    return []
+def get_member_name_from_blog(ct, title):
+    """
+    ctに基づきメンバー名を判定。
+    期生グループの場合はタイトルから名前を抽出する。
+    """
+    # 運営スタッフ(40003)は除外
+    if ct == "40003":
+        return None
+    
+    # 個人ブログの場合
+    if ct in MEMBER_CT_MAP:
+        return MEMBER_CT_MAP[ct]
+    
+    # 期生ブログの場合、タイトルからメンバー名を検索
+    if ct in GROUP_CT_MAP:
+        for name in MEMBER_CT_MAP.values():
+            if name in title:
+                return name
+                
+    return None
 
 async def get_blog_list(session):
     await update_member_cache(session)
-    urls = await get_all_blog_urls(session)
-    return []
+    # 記事取得の巡回ロジックをここに実装
+    blogs = []
+    # 例: 記事を取得した際に以下のように判定する
+    # name = get_member_name_from_blog(ct, blog_title)
+    # if name: ...
+    return blogs
 
 async def get_oldest_first():
-    async with aiohttp.ClientSession() as session:
-        return await get_blog_list(session)
+    # 実行用メイン関数
+    return []
