@@ -72,7 +72,8 @@ ARCHIVE_MEMBER_CHANNELS = {
 # =========================
 
 async def download_image(
-    url
+    url,
+    index
 ):
     try:
         async with aiohttp.ClientSession() as session:
@@ -85,7 +86,7 @@ async def download_image(
 
                 return discord.File(
                     io.BytesIO(data),
-                    filename="image.jpg"
+                    filename=f"image_{index}.jpg"  # 💡 何枚目かわかるように番号を付与
                 )
 
     except Exception as e:
@@ -94,27 +95,6 @@ async def download_image(
             e
         )
         return None
-
-
-
-
-
-async def create_files(
-    image_urls
-):
-    files = []
-
-    for url in image_urls[:5]:
-        file = await download_image(
-            url
-        )
-
-        if file:
-            files.append(
-                file
-            )
-
-    return files
 
 
 
@@ -180,9 +160,8 @@ async def on_ready():
         archive_loop.start()
 
 
-# 💡 【カスタム】アーカイブを一時停止するコマンド
 @bot.command()
-@commands.is_owner()  # コマンド作成者（あなた）だけが実行可能
+@commands.is_owner()
 async def archive_stop(ctx):
     if archive_loop.is_running():
         archive_loop.cancel()
@@ -191,7 +170,6 @@ async def archive_stop(ctx):
         await ctx.send("⚠️ アーカイブは既に停止しています。")
 
 
-# 💡 【カスタム】アーカイブを再開するコマンド
 @bot.command()
 @commands.is_owner()
 async def archive_start(ctx):
@@ -202,7 +180,6 @@ async def archive_start(ctx):
         await ctx.send("⚠️ アーカイブは既に動作中です。")
 
 
-# 💡 【カスタム】現在の動作状態を確認するコマンド
 @bot.command()
 async def archive_status(ctx):
     if archive_loop.is_running():
@@ -211,7 +188,6 @@ async def archive_status(ctx):
         await ctx.send("🔴 現在、アーカイブ自動監視は【停止中】です。")
 
 
-# エラーハンドリング（管理者以外の実行を弾いたときのメッセージ）
 @archive_stop.error
 @archive_start.error
 async def archive_command_error(ctx, error):
@@ -259,7 +235,7 @@ async def archive_loop():
                 )
                 continue
 
-            # 画像取得
+            # 画像URLのリストをすべて取得
             image_urls = get_images(
                 blog["url"]
             )
@@ -279,20 +255,30 @@ async def archive_loop():
                 text=f"Archive BOT • 画像総数: {len(image_urls)}枚"
             )
 
-            # 全体＋個別へ送信
+            # 💡 各ターゲットチャンネルごとに処理を行う
             for channel in channels:
-                send_files = []
+                # 【カスタム①】先にEmbed（テキストカード）だけを投稿
+                await channel.send(embed=embed)
+                await asyncio.sleep(SEND_DELAY)
+
+                # 【カスタム②】画像をすべてダウンロードして投稿（上限なし）
                 if image_urls:
-                    send_files = await create_files(image_urls)
+                    files = []
+                    for index, url in enumerate(image_urls, start=1):
+                        file = await download_image(url, index)
+                        if file:
+                            files.append(file)
 
-                await channel.send(
-                    embed=embed,
-                    files=send_files
-                )
+                        # Discordは一度に最大10枚しかファイルを添付できないため、10枚溜まるごとに送信
+                        if len(files) == 10:
+                            await channel.send(files=files)
+                            files = []  # リストを空にする
+                            await asyncio.sleep(SEND_DELAY)
 
-                await asyncio.sleep(
-                    SEND_DELAY
-                )
+                    # 10枚に満たなかった残りの画像があれば最後に送信
+                    if files:
+                        await channel.send(files=files)
+                        await asyncio.sleep(SEND_DELAY)
 
             # archive.db保存
             save_archive(
