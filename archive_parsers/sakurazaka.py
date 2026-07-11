@@ -1,9 +1,7 @@
+import re
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-
-from parsers.utils import normalize_datetime
-
 
 HEADERS = {
     "User-Agent": (
@@ -15,23 +13,42 @@ HEADERS = {
     )
 }
 
+def format_sakurazaka_date(date_text):
+    """
+    櫻坂46ブログの日付文字列を 'YYYY年MM月DD日 HH:MM' に確実に整形する関数
+    入力例: '2026.7.11 20:30' や '2026/07/11 20:30:15'、'2026年07月11日 20:30' などに対応
+    """
+    if not date_text:
+        return "不明"
+        
+    # 余分な空白を削除
+    clean_text = date_text.strip()
+    
+    # 数字をすべて抽出 (年, 月, 日, 時, 分)
+    nums = re.findall(r'\d+', clean_text)
+    
+    if len(nums) >= 5:
+        year = nums[0]
+        month = nums[1].zfill(2)  # 1桁なら0埋め
+        day = nums[2].zfill(2)
+        hour = nums[3].zfill(2)
+        minute = nums[4].zfill(2)
+        return f"{year}年{month}月{day}日 {hour}:{minute}"
+        
+    return clean_text
 
 def get_sakurazaka_images(url):
-
     response = requests.get(
         url,
         headers=HEADERS,
         timeout=10
     )
-
     response.raise_for_status()
-
 
     soup = BeautifulSoup(
         response.text,
-        "lxml"  # 💡 精度向上のため新着Botと同じくlxml（またはhtml.parser）を使用
+        "lxml"
     )
-
 
     blog = {
         "group": "櫻坂46",
@@ -42,30 +59,27 @@ def get_sakurazaka_images(url):
         "images": []
     }
 
-
     # =====================
-    # 💡 メンバー名（新着Botの構造に修正）
+    # メンバー名
     # =====================
     member_tag = soup.select_one(".name")
     if member_tag:
         blog["member"] = member_tag.get_text(strip=True)
 
-
     # =====================
-    # 💡 タイトル（新着Botの構造に修正）
+    # タイトル
     # =====================
     title_tag = soup.select_one(".title")
     if title_tag:
         blog["title"] = title_tag.get_text(" ", strip=True)
 
-
     # =====================
-    # 💡 日付・時間（新着Botの構造に修正＋時間も含むよう対応）
+    # 💡 日付・時間 (直接フォーマット整形関数を通すように修正)
     # =====================
     date_tag = soup.select_one(".date")
     if date_tag:
-        blog["date"] = normalize_datetime(date_tag.get_text(strip=True))
-
+        raw_date = date_tag.get_text(strip=True)
+        blog["date"] = format_sakurazaka_date(raw_date)
 
     # =====================
     # 本文（画像の抽出範囲）
@@ -81,15 +95,12 @@ def get_sakurazaka_images(url):
     if article is None:
         article = soup
 
-
-
     # =====================
     # 画像取得
     # =====================
     seen = set()
 
     for img in article.find_all("img"):
-
         src = (
             img.get("src")
             or
@@ -106,21 +117,12 @@ def get_sakurazaka_images(url):
         # ロゴ・アイコン除外
         if any(
             x in image_url.lower()
-            for x in [
-                "logo",
-                "icon",
-                "header",
-                "footer"
-            ]
+            for x in ["logo", "icon", "header", "footer"]
         ):
             continue
 
         # 櫻坂ブログ画像判定
-        if (
-            "/files/" not in image_url
-            or
-            "diary" not in image_url
-        ):
+        if "/files/" not in image_url or "diary" not in image_url:
             continue
 
         if image_url in seen:
@@ -129,10 +131,8 @@ def get_sakurazaka_images(url):
         seen.add(image_url)
         blog["images"].append(image_url)
 
-
     print(
-        f"櫻坂ブログ解析完了: {blog['member']} - {blog['title']} (画像: {len(blog['images'])}枚)"
+        f"櫻坂ブログ解析完了: {blog['member']} - {blog['title']} [{blog['date']}] (画像: {len(blog['images'])}枚)"
     )
-
 
     return blog
