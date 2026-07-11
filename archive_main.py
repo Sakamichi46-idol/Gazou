@@ -25,7 +25,10 @@ from archive_image_getter import (
 
 from keep_alive import keep_alive
 
-
+from archive_config import (
+    ARCHIVE_INTERVAL,
+    SEND_DELAY
+)
 
 
 # =========================
@@ -248,7 +251,7 @@ async def on_ready():
 
 
 @tasks.loop(
-    minutes=1
+    seconds=ARCHIVE_INTERVAL
 )
 async def archive_loop():
 
@@ -379,7 +382,7 @@ async def archive_loop():
 
 
                 await asyncio.sleep(
-                    1
+                    SEND_DELAY
                 )
 
 
@@ -405,7 +408,7 @@ async def archive_loop():
 
 
             await asyncio.sleep(
-                2
+                SEND_DELAY
             )
 
 
