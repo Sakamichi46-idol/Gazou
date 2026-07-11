@@ -9,7 +9,8 @@ archive_config.py
 # ==========================
 
 # 一度にアーカイブする記事数
-ARCHIVE_BATCH_SIZE = 5
+ARCHIVE_BATCH_SIZE = 1
+
 
 # チェック間隔（秒）
 ARCHIVE_INTERVAL = 60
