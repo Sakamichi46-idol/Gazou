@@ -45,54 +45,50 @@ async def get_all_blog_urls(session):
     print("[デバッグ] 乃木坂46 記事収集開始...")
     all_blogs = []
     
-    for ct, name in member_cache.items():
-        if ct == "40003": continue
-            
-        url = f"https://www.nogizaka46.com/s/n46/diary/MEMBER/list?ct={ct}"
+    # ページングを考慮（必要に応じて範囲を調整してください）
+    for page in range(1, 3): 
+        url = f"https://www.nogizaka46.com/s/n46/diary/MEMBER?page={page}"
         try:
             async with session.get(url, headers=HEADERS) as resp:
-                # --- デバッグ追加 ---
-                print(f"[デバッグ] アクセス: {name}(ct={ct})")
-                print(f"[デバッグ] 最終アクセス先URL: {resp.url}")
-                
                 html = await resp.text()
-                print(f"[デバッグ] 取得HTMLサイズ: {len(html)}文字")
-                # ------------------
-                
                 soup = BeautifulSoup(html, "html.parser")
-                posts = soup.select("div.js-apiblog-list > div.m--postone")
+                
+                # [重要] js-apiblog-list に依存せず、ページ全体から直接記事ブロックを探す
+                posts = soup.select("div.m--postone")
+                
+                if not posts:
+                    print(f"[デバッグ] {page}ページ目で記事が見つかりませんでした。")
+                    continue
                 
                 for post in posts:
+                    # 各要素を確実に取得
                     a_tag = post.select_one("a.m--postone__a")
-                    time_tag = post.select_one("p.m--postone__time")
+                    name_tag = post.select_one("p.m--postone__name")
                     title_tag = post.select_one("p.m--postone__ttl")
+                    time_tag = post.select_one("p.m--postone__time")
                     
-                    if a_tag and time_tag and title_tag:
+                    if a_tag and name_tag and title_tag and time_tag:
                         post_url = a_tag.get("href")
+                        # 相対パスなら補完
                         if post_url.startswith("/"):
                             post_url = "https://www.nogizaka46.com" + post_url
                             
-                        post_time = time_tag.get_text(strip=True)
+                        member_name = name_tag.get_text(strip=True)
                         post_title = title_tag.get_text(strip=True)
+                        post_time = time_tag.get_text(strip=True)
                         
-                        target_name = get_member_name_from_blog(ct, post_title)
-                        if target_name:
-                            all_blogs.append({
-                                "url": post_url,
-                                "date": post_time,
-                                "title": post_title,
-                                "member": target_name
-                            })
+                        all_blogs.append({
+                            "url": post_url,
+                            "date": post_time,
+                            "title": post_title,
+                            "member": member_name
+                        })
+                        
+                        # ログで確認用
+                        print(f"取得成功: {member_name} - {post_title}")
+                        
         except Exception as e:
-            print(f"エラー: {name} の取得中にエラー発生: {e}")
+            print(f"エラー発生: {e}")
             
     print(f"[デバッグ] 乃木坂46 収集完了。総数: {len(all_blogs)}件")
     return all_blogs
-
-async def get_blog_list(session):
-    await update_member_cache(session)
-    return await get_all_blog_urls(session)
-
-async def get_oldest_first():
-    async with aiohttp.ClientSession() as session:
-        return await get_blog_list(session)
