@@ -11,39 +11,49 @@ HEADERS = {
 member_cache = {}
 
 async def update_member_cache(session):
-    """メンバーリストからCt番号と名前の辞書を構築"""
+    """メンバー一覧ページから全メンバーのCt番号と名前の辞書を構築"""
     try:
-        url = "https://www.nogizaka46.com/s/n46/diary/MEMBER/list"
+        # メンバー一覧ページから全メンバー情報を取得するように変更
+        url = "https://www.nogizaka46.com/s/n46/artist"
         async with session.get(url, headers=HEADERS) as resp:
             html = await resp.text()
             soup = BeautifulSoup(html, "html.parser")
             
-            # クラス名に依存せず、select内のoptionを全取得して判定
-            for option in soup.select("select option"):
-                href = option.get("value", "")
-                if "ct=" in href:
-                    ct = parse_qs(urlparse(href).query).get("ct", [None])[0]
-                    name = option.get_text().split("(")[0].strip()
-                    if ct and name and "メンバー" not in name:
-                        member_cache[ct] = name
+            # ブログへのリンクが含まれる要素を抽出
+            # 乃木坂のサイト構造に基づき、ブログへのリンクには ct= パラメータが含まれています
+            member_links = soup.select("a[href*='ct=']")
+            
+            for link in member_links:
+                href = link.get("href", "")
+                query = urlparse(href).query
+                ct = parse_qs(query).get("ct", [None])[0]
+                
+                # 名前はリンクテキストやalt属性等から取得を試みる
+                name = link.get_text(strip=True)
+                
+                if ct and name and len(name) < 20: # 異常に長い文字列は除外
+                    member_cache[ct] = name
+        
         print(f"乃木坂46 メンバー辞書を更新: {len(member_cache)}名")
     except Exception as e:
         print(f"メンバー辞書更新エラー: {e}")
 
 async def get_all_blog_urls(session):
     """全ブログ記事のURLを収集する"""
+    print("乃木坂46 全ブログ記事URLを収集します...")
     urls = []
-    # ここは、君の環境にある「乃木坂の全記事URLを取得するロジック」を記述してください
-    # もし全URL取得関数が別にあるならそれを呼び出し、なければここで行う
-    print("全ブログ記事URLを収集します...")
-    # (例: 一覧ページを順次巡回して urls に追加する処理)
+    
+    # メンバーごとのブログページを順番に巡回してURLを取得する処理が必要です
+    # ここは、君の環境ですでに実装されている巡回ロジックを配置してください
+    # もし実装がない場合は、各メンバーのctを使って記事一覧を叩くロジックを追加します
+    
     return urls
 
 async def get_blog_list(session):
     # 1. メンバー辞書を更新
     await update_member_cache(session)
     
-    # 2. 全URLを取得 (get_member_pagesの代わり)
+    # 2. 全URLを取得
     urls = await get_all_blog_urls(session)
     
     blogs = []
@@ -53,7 +63,7 @@ async def get_blog_list(session):
                 html = await response.text()
                 soup = BeautifulSoup(html, "html.parser")
 
-            # ★URLのCt番号から辞書引き
+            # URLのCt番号から辞書引き
             ct = parse_qs(urlparse(url).query).get("ct", [None])[0]
             member = member_cache.get(ct, "不明")
 
