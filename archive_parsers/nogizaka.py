@@ -2,7 +2,7 @@ import re
 import aiohttp
 
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse  import urljoin
 
 
 HEADERS = {
