@@ -1,5 +1,6 @@
 import re
-import requests
+import asyncio
+import aiohttp
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, parse_qs
 
@@ -12,7 +13,6 @@ HEADERS = {
 }
 
 BASE_URL = "https://sakurazaka46.com"
-# 💡 ページ指定用のベースURL
 BLOG_LIST_BASE_URL = "https://sakurazaka46.com/s/s46/diary/blog/list?ima=0000&page={page}"
 
 def format_sakurazaka_date(date_text):
@@ -29,11 +29,15 @@ def format_sakurazaka_date(date_text):
         return f"{year}年{month}月{day}日 {hour}:{minute}"
     return clean_text
 
-def get_sakurazaka_images(url):
+# 💡 session を引数で受け取る非同期関数に変更
+async def get_sakurazaka_images(session, url):
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        # aiohttpでのタイムアウト指定（接続・読み込みの合計を10秒に制限）
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with session.get(url, headers=HEADERS, timeout=timeout) as response:
+            response.raise_for_status()
+            html = await response.text()
+            soup = BeautifulSoup(html, "html.parser")
     except Exception as e:
         print(f"櫻坂個別ページ取得エラー: {url} {e}")
         return {"group": "櫻坂46", "member": "", "title": "", "date": "不明", "url": url, "images": []}
@@ -88,18 +92,16 @@ def get_sakurazaka_images(url):
 
     return blog
 
-def get_max_page():
-    """
-    💡 ブログ一覧から一番最後のページ番号（最古のページ、例: 381）を自動取得する関数
-    """
+# 💡 非同期関数に変更
+async def get_max_page(session):
     try:
-        # 1ページ目を読み込んで全体のページャーを確認する
-        response = requests.get(BLOG_LIST_BASE_URL.format(page=0), headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with session.get(BLOG_LIST_BASE_URL.format(page=0), headers=HEADERS, timeout=timeout) as response:
+            response.raise_for_status()
+            html = await response.text()
+            soup = BeautifulSoup(html, "html.parser")
         
         max_page = 0
-        # ページネーションのリンクをすべて探す
         for a in soup.select(".com-pager a[href]"):
             href = a.get("href")
             parsed = urlparse(href)
@@ -110,32 +112,28 @@ def get_max_page():
                 if p_num > max_page:
                     max_page = p_num
         
-        # ページャーが見つかればそれを返す。見つからなければ安全のため381などをデフォルトに
         return max_page if max_page > 0 else 381
     except Exception as e:
         print(f"最大ページ数取得エラー: {e}")
         return 381
 
-def get_blog_urls():
-    """
-    💡 【古い順対応】最古のページから順に巡回してURLを取得する
-    """
+# 💡 非同期関数に変更
+async def get_blog_urls(session):
     urls = []
     
-    # 一番古いページ番号を取得（例: 381）
-    max_page = get_max_page()
+    # 💡 await をつけて呼び出す
+    max_page = await get_max_page(session)
     print(f"櫻坂46ブログの最古ページ番号: {max_page} から遡り巡回を開始します。")
 
-    # 💡 最大ページ（過去）から 0ページ（最新）に向かって逆順でループを回す
-    # 例: page=381, 380, 379 ... 0
     for page in range(max_page, -1, -1):
         url = BLOG_LIST_BASE_URL.format(page=page)
         try:
-            response = requests.get(url, headers=HEADERS, timeout=10)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with session.get(url, headers=HEADERS, timeout=timeout) as response:
+                response.raise_for_status()
+                html = await response.text()
+                soup = BeautifulSoup(html, "html.parser")
             
-            # 💡 各ページ内のブログURLを抽出
             page_urls = []
             for a in soup.find_all("a", href=True):
                 href = a.get("href")
@@ -144,10 +142,11 @@ def get_blog_urls():
                     if target_url not in page_urls and target_url not in urls:
                         page_urls.append(target_url)
             
-            # 💡 1つのページ内は「新着順（上にあるのが新しい）」で並んでいるため、
-            # ページ内のURL一覧を逆順（古い順）にして全体のリストに追加する
             page_urls.reverse()
             urls.extend(page_urls)
+            
+            # 💡 連続リクエストでサーバーに負荷をかけないよう、非同期の sleep を入れる
+            await asyncio.sleep(0.5)
             
         except Exception as e:
             print(f"櫻坂一覧ページ(page={page})取得エラー: {e}")
@@ -155,24 +154,27 @@ def get_blog_urls():
 
     return urls
 
-def get_oldest_first():
-    """
-    古い順に並んだブログデータのリストを返す
-    """
-    # ここで返ってくるURLリストは【最古ページ ➔ 最新ページかつ、ページ内も古い順】になっています
-    urls = get_blog_urls()
+# 💡 非同期関数に変更
+async def get_oldest_first():
     blogs = []
+    
+    # セッションを作成して使い回す
+    async with aiohttp.ClientSession() as session:
+        # 💡 await をつけてURLリストを取得
+        urls = await get_blog_urls(session)
 
-    for url in urls:
-        blog_data = get_sakurazaka_images(url)
-        blogs.append({
-            "group": blog_data["group"],
-            "url": blog_data["url"],
-            "member": blog_data["member"],
-            "title": blog_data["title"],
-            "date": blog_data["date"]
-        })
+        for url in urls:
+            # 💡 await をつけて個別ページからデータを取得
+            blog_data = await get_sakurazaka_images(session, url)
+            blogs.append({
+                "group": blog_data["group"],
+                "url": blog_data["url"],
+                "member": blog_data["member"],
+                "title": blog_data["title"],
+                "date": blog_data["date"]
+            })
+            # 💡 ここでも少し待機を入れると安全
+            await asyncio.sleep(0.5)
 
-    # 念のため、日付文字列ベースでも昇順（古い順）ソートをかけて安全性を担保
     blogs.sort(key=lambda x: x.get("date", ""))
     return blogs
