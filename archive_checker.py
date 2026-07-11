@@ -22,18 +22,11 @@ from archive_config import (
 
 
 
-
-
-# =========================
-# 全ブログ取得
-# =========================
-
 def get_all_blogs():
 
     """
     全グループのブログ取得
     """
-
 
     blogs = []
 
@@ -41,42 +34,32 @@ def get_all_blogs():
     parsers = [
 
         get_nogizaka,
-
         get_sakurazaka,
-
         get_hinatazaka
 
     ]
 
 
-
     for parser in parsers:
 
-
         try:
-
 
             result = parser()
 
 
-
             if result:
-
 
                 blogs.extend(
                     result
                 )
 
 
-
         except Exception as e:
-
 
             print(
                 "取得エラー:",
                 e
             )
-
 
 
     return blogs
@@ -85,36 +68,24 @@ def get_all_blogs():
 
 
 
-
-# =========================
-# アーカイブ対象取得
-# =========================
-
 def get_archive_targets():
 
     """
     未アーカイブ記事を取得
-
-    古い順で
-    ARCHIVE_BATCH_SIZE件返す
+    古い順で返す
     """
-
 
 
     blogs = get_all_blogs()
 
 
 
-    # 古い順
-
     blogs.sort(
-
         key=lambda x:
             x.get(
                 "date",
                 ""
             )
-
     )
 
 
@@ -131,11 +102,9 @@ def get_archive_targets():
         )
 
 
-
         if not url:
 
             continue
-
 
 
 
@@ -147,18 +116,15 @@ def get_archive_targets():
 
 
 
-
         targets.append(
             blog
         )
 
 
 
-
         if len(targets) >= ARCHIVE_BATCH_SIZE:
 
             break
-
 
 
 
