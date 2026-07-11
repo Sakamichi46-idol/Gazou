@@ -52,7 +52,7 @@ async def get_all_blogs():
             )
 
 
-            result = await parser()
+            result = await parser(session)
 
 
 
