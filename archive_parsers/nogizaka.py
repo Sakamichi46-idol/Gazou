@@ -128,28 +128,35 @@ async def get_all_blog_urls(session):
             ) as response:
 
                 html = await response.text()
+
+
+            # =========================
+            # デバッグ用
+            # js-apiglob確認
+            # =========================
+
+            index = html.find(
+                "js-apiglob"
+            )
+
+            if index != -1:
+
                 print(
-                    "乃木坂HTML確認:",
-                    html[:500]
+                    "js-apiglob周辺:",
+                    html[index:index+2000]
+                )
+
+            else:
+
+                print(
+        "js-apiglobが見つかりません"
                 )
 
 
-
-        except Exception as e:
-
-            print(
-                "乃木坂ページ取得エラー:",
-                e
+            soup = BeautifulSoup(
+                html,
+                "html.parser"
             )
-
-            continue
-
-
-
-        soup = BeautifulSoup(
-            html,
-            "html.parser"
-        )
 
 
         posts = soup.select(
