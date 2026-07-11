@@ -1,6 +1,15 @@
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from archive_parsers.nogizaka import (
+    get_oldest_first as get_nogizaka
+)
+
+from archive_parsers.sakurazaka import (
+    get_oldest_first as get_sakurazaka
+)
+
+from archive_parsers.hinatazaka import (
+    get_oldest_first as get_hinatazaka
+)
+
 
 from archive_database import (
     is_archived,
@@ -8,53 +17,124 @@ from archive_database import (
 )
 
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+from archive_config import (
+    ARCHIVE_BATCH_SIZE
+)
 
 
-def get_blog_links(url):
 
-    response = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=10
-    )
+def get_all_blogs():
 
-    response.raise_for_status()
+    """
+    全グループのブログ取得
+    """
 
-    soup = BeautifulSoup(
-        response.text,
-        "lxml"
-    )
-
-    links = []
-
-    for a in soup.select("a[href]"):
-
-        href = a.get("href")
-
-        if "/detail/" not in href:
-            continue
-
-        full = urljoin(url, href)
-
-        if full not in links:
-            links.append(full)
-
-    return links
+    blogs = []
 
 
-def get_oldest_not_archived(url):
+    parsers = [
 
-    links = get_blog_links(url)
+        get_nogizaka,
+        get_sakurazaka,
+        get_hinatazaka
+
+    ]
+
+
+    for parser in parsers:
+
+        try:
+
+            result = parser()
+
+            if result:
+
+                blogs.extend(
+                    result
+                )
+
+
+        except Exception as e:
+
+            print(
+                "取得エラー:",
+                e
+            )
+
+
+    return blogs
+
+
+
+def get_archive_targets():
+
+    """
+    未アーカイブ記事を取得
+
+    古い順で
+    ARCHIVE_BATCH_SIZE件返す
+    """
+
+
+    blogs = get_all_blogs()
+
 
     # 古い順
-    links.reverse()
 
-    for link in links:
+    blogs.sort(
+        key=lambda x:
+            x.get(
+                "date",
+                ""
+            )
+    )
 
-        if not is_archived(link):
-            return link
 
-    return None
+    targets = []
+
+
+    for blog in blogs:
+
+
+        url = blog.get(
+            "url"
+        )
+
+
+        if not url:
+
+            continue
+
+
+
+        if is_archived(url):
+
+            continue
+
+
+
+        targets.append(
+            blog
+        )
+
+
+        if len(targets) >= ARCHIVE_BATCH_SIZE:
+
+            break
+
+
+
+    return targets
+
+
+
+def mark_archived(blog):
+
+    """
+    アーカイブ済み登録
+    """
+
+
+    save_archive(
+        blog["url"]
+    )
