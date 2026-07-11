@@ -2,6 +2,7 @@ import os
 import asyncio
 import io
 import shutil
+import aiohttp
 import discord
 from discord.ext import commands, tasks
 
@@ -27,7 +28,7 @@ ARCHIVE_ALL_CHANNEL = 1525522665614606427
 
 # グループ別（グループ名: チャンネルID）
 ARCHIVE_GROUP_CHANNELS = {
-    "日向坂46": 1525523279660580904, 
+    "日向坂46": 1525523381674446868, 
     "櫻坂46": 1525523343644561418,
     "乃木坂46": 1525523279660580904,
 }
