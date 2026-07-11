@@ -154,38 +154,42 @@ async def get_blog_urls(session):
 
     return urls
 
-async def get_oldest_first(session):
+async def get_oldest_first():
 
     blogs = []
 
 
-    urls = await get_blog_urls(
-        session
-    )
+    async with aiohttp.ClientSession() as session:
 
 
-    for url in urls:
-
-        blog_data = await get_sakurazaka_images(
-            session,
-            url
+        urls = await get_blog_urls(
+            session
         )
 
 
-        blogs.append(
-            {
-                "group": blog_data["group"],
-                "url": blog_data["url"],
-                "member": blog_data["member"],
-                "title": blog_data["title"],
-                "date": blog_data["date"]
-            }
-        )
+        for url in urls:
 
 
-        await asyncio.sleep(
-            0.5
-        )
+            blog_data = await get_sakurazaka_images(
+                session,
+                url
+            )
+
+
+            blogs.append(
+                {
+                    "group": blog_data["group"],
+                    "url": blog_data["url"],
+                    "member": blog_data["member"],
+                    "title": blog_data["title"],
+                    "date": blog_data["date"]
+                }
+            )
+
+
+            await asyncio.sleep(
+                0.5
+            )
 
 
 
