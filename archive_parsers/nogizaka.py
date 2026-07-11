@@ -1,13 +1,11 @@
 import aiohttp
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, parse_qs
 
 # 定数設定
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-# メンバー辞書
 MEMBER_CT_MAP = {
     "55396": "五百城 茉央", "55397": "池田 瑛紗", "55390": "一ノ瀬 美空",
     "36749": "伊藤 理々杏", "55389": "井上 和", "36750": "岩本 蓮加",
@@ -22,7 +20,6 @@ MEMBER_CT_MAP = {
     "63111": "矢田 萌華", "55387": "弓木 奈於", "36759": "吉田 綾乃クリスティー"
 }
 
-# 期生グループID
 GROUP_CT_MAP = {
     "40004": "３期生", "40005": "４期生", 
     "40001": "新4期生", "40007": "5期生", "40008": "6期生"
@@ -56,7 +53,15 @@ async def get_all_blog_urls(session):
             async with session.get(url, headers=HEADERS) as resp:
                 html = await resp.text()
                 soup = BeautifulSoup(html, "html.parser")
-                posts = soup.select("div.m--postone")
+                
+                # --- デバッグ追加 ---
+                # 取得したページに記事リストの親要素があるか確認
+                has_list = soup.select_one("div.js-apiblog-list") is not None
+                if not has_list:
+                    print(f"[デバッグ] 警告: {name}(ct={ct}) のページに div.js-apiblog-list が見当たりません。")
+                # ------------------
+
+                posts = soup.select("div.js-apiblog-list > div.m--postone")
                 
                 for post in posts:
                     a_tag = post.select_one("a.m--postone__a")
@@ -65,7 +70,6 @@ async def get_all_blog_urls(session):
                     
                     if a_tag and time_tag and title_tag:
                         post_url = a_tag.get("href")
-                        # 相対パスなら補完する
                         if post_url.startswith("/"):
                             post_url = "https://www.nogizaka46.com" + post_url
                             
