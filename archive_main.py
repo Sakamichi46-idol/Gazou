@@ -45,7 +45,7 @@ bot = commands.Bot(
 
 # 全記事を保存するアーカイブチャンネル
 
-ARCHIVE_ALL_CHANNEL = 0
+ARCHIVE_ALL_CHANNEL = 1524064741016862883
 
 
 
