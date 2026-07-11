@@ -11,41 +11,45 @@ HEADERS = {
 member_cache = {}
 
 async def update_member_cache(session):
-    """メンバー一覧ページから全メンバー情報を抽出して辞書を構築"""
+    """HTML構造に最適化したメンバー辞書構築ロジック"""
     try:
-        url = "https://www.nogizaka46.com/s/n46/artist"
+        url = "https://www.nogizaka46.com/s/n46/diary/MEMBER/list"
         async with session.get(url, headers=HEADERS) as resp:
             html = await resp.text()
             soup = BeautifulSoup(html, "html.parser")
             
-            # 乃木坂のメンバー詳細（ブログ）へのリンクをすべて取得
-            # リンクのhrefに '/diary/MEMBER/list?' が含まれるものを全抽出
-            links = soup.find_all("a", href=lambda x: x and "/diary/MEMBER/list?" in x)
+            # ご提示いただいた構造に基づき div.ba--mmsel__pc__one を抽出
+            member_divs = soup.select("div.ba--mmsel__pc__one")
             
-            for link in links:
-                href = link.get("href", "")
-                # リンク内のテキストを名前として取得（タグが入れ子の場合を考慮）
-                name = link.get_text(strip=True)
+            # 除外対象のリスト
+            exclude_names = ["運営スタッフ", "３期生", "４期生", "新4期生", "5期生", "6期生"]
+            
+            for div in member_divs:
+                a_tag = div.select_one("a.ba--mmsel__pc__a")
+                p_tag = div.select_one("p.ba--mmsel__pc__neme")
                 
-                # ctパラメータを抽出
-                query = urlparse(href).query
-                ct = parse_qs(query).get("ct", [None])[0]
-                
-                # ctがあり、かつ名前が空でない場合のみ登録
-                if ct and name and "HANDSHAKE" not in href:
-                    member_cache[ct] = name
+                if a_tag and p_tag:
+                    href = a_tag.get("href", "")
+                    name = p_tag.get_text(strip=True)
                     
-        print(f"乃木坂46 メンバー辞書を更新: {len(member_cache)}名")
-        # 登録された全メンバーを確認用に出力
-        for ct, name in member_cache.items():
-            print(f"  - {name} (ct={ct})")
+                    # ct番号を抽出
+                    query = urlparse(href).query
+                    ct = parse_qs(query).get("ct", [None])[0]
+                    
+                    # メンバーのみを辞書に登録
+                    if ct and name and name not in exclude_names:
+                        member_cache[ct] = name
             
+            print(f"乃木坂46 メンバー辞書を更新: {len(member_cache)}名")
+            for ct, name in member_cache.items():
+                print(f"  [登録] {name} (ct={ct})")
+                
     except Exception as e:
         print(f"メンバー辞書更新エラー: {e}")
 
 async def get_all_blog_urls(session):
     """全ブログ記事のURLを収集する"""
-    print("乃木坂46 全ブログ記事URLを収集します...")
+    # 実際にはここに各メンバーのブログリストを巡回するロジックが入ります
     return []
 
 async def get_blog_list(session):
@@ -55,5 +59,4 @@ async def get_blog_list(session):
 
 async def get_oldest_first():
     async with aiohttp.ClientSession() as session:
-        blogs = await get_blog_list(session)
-    return blogs
+        return await get_blog_list(session)
