@@ -12,8 +12,7 @@ from archive_parsers.hinatazaka import (
 
 
 from archive_database import (
-    is_archived,
-    save_archive
+    is_archived
 )
 
 
@@ -23,11 +22,18 @@ from archive_config import (
 
 
 
+
+
+# =========================
+# 全ブログ取得
+# =========================
+
 def get_all_blogs():
 
     """
     全グループのブログ取得
     """
+
 
     blogs = []
 
@@ -35,26 +41,36 @@ def get_all_blogs():
     parsers = [
 
         get_nogizaka,
+
         get_sakurazaka,
+
         get_hinatazaka
 
     ]
 
 
+
     for parser in parsers:
+
 
         try:
 
+
             result = parser()
 
+
+
             if result:
+
 
                 blogs.extend(
                     result
                 )
 
 
+
         except Exception as e:
+
 
             print(
                 "取得エラー:",
@@ -62,9 +78,17 @@ def get_all_blogs():
             )
 
 
+
     return blogs
 
 
+
+
+
+
+# =========================
+# アーカイブ対象取得
+# =========================
 
 def get_archive_targets():
 
@@ -76,21 +100,27 @@ def get_archive_targets():
     """
 
 
+
     blogs = get_all_blogs()
+
 
 
     # 古い順
 
     blogs.sort(
+
         key=lambda x:
             x.get(
                 "date",
                 ""
             )
+
     )
 
 
+
     targets = []
+
 
 
     for blog in blogs:
@@ -101,15 +131,20 @@ def get_archive_targets():
         )
 
 
+
         if not url:
 
             continue
 
 
 
-        if is_archived(url):
+
+        if is_archived(
+            url
+        ):
 
             continue
+
 
 
 
@@ -118,23 +153,13 @@ def get_archive_targets():
         )
 
 
+
+
         if len(targets) >= ARCHIVE_BATCH_SIZE:
 
             break
 
 
 
+
     return targets
-
-
-
-def mark_archived(blog):
-
-    """
-    アーカイブ済み登録
-    """
-
-
-    save_archive(
-        blog["url"]
-    )
