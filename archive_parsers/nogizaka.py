@@ -68,7 +68,7 @@ def normalize_name(text):
     if not text:
         return ""
 
-    # 空白除去
+    # 全ての空白を削除
     text = re.sub(
         r"\s+",
         "",
@@ -76,8 +76,6 @@ def normalize_name(text):
     )
 
     return text
-
-
 
 
 
@@ -90,33 +88,27 @@ def detect_member(
     title
 ):
 
-
     # 運営スタッフ除外
 
     if "運営スタッフ" in member_name:
-
         return None
 
-
-
-    # 通常メンバー名
 
     normalized_title = normalize_name(
         title
     )
 
 
+    # タイトルから判定
 
     for name in MEMBER_NAMES:
 
-
         if name in normalized_title:
-
             return name
 
 
 
-    # ページ表示名が本人の場合
+    # 表示名から判定
 
     normalized_member = normalize_name(
         member_name
@@ -125,16 +117,12 @@ def detect_member(
 
     for name in MEMBER_NAMES:
 
-
         if normalized_member == name:
-
             return name
 
 
 
     return None
-
-
 
 
 
@@ -149,9 +137,10 @@ async def get_all_blog_urls(
     blogs = []
 
 
+    # ページ数拡大
     for page in range(
         1,
-        3
+        10
     ):
 
 
@@ -161,13 +150,25 @@ async def get_all_blog_urls(
         )
 
 
-        async with session.get(
-            url,
-            headers=HEADERS
-        ) as response:
+        try:
+
+            async with session.get(
+                url,
+                headers=HEADERS
+            ) as response:
 
 
-            html = await response.text()
+                html = await response.text()
+
+
+        except Exception as e:
+
+            print(
+                "乃木坂一覧取得エラー:",
+                e
+            )
+
+            continue
 
 
 
@@ -180,6 +181,12 @@ async def get_all_blog_urls(
 
         posts = soup.select(
             "div.m--postone"
+        )
+
+
+        print(
+            f"乃木坂 page={page} 記事数:",
+            len(posts)
         )
 
 
@@ -213,7 +220,6 @@ async def get_all_blog_urls(
                 and title_tag
                 and time_tag
             ):
-
                 continue
 
 
@@ -232,9 +238,22 @@ async def get_all_blog_urls(
             )
 
 
+
             title = title_tag.get_text(
                 strip=True
             )
+
+
+
+            # デバッグ確認
+
+            print(
+                "DEBUG:",
+                raw_member,
+                "|",
+                title
+            )
+
 
 
             member = detect_member(
@@ -244,9 +263,14 @@ async def get_all_blog_urls(
 
 
 
-            # 判定できないものは除外
-
             if not member:
+
+                print(
+                    "判定失敗:",
+                    raw_member,
+                    "|",
+                    title
+                )
 
                 continue
 
@@ -254,7 +278,6 @@ async def get_all_blog_urls(
 
             blogs.append(
                 {
-
                     "group":
                         "乃木坂46",
 
@@ -271,9 +294,15 @@ async def get_all_blog_urls(
                         time_tag.get_text(
                             strip=True
                         )
-
                 }
             )
+
+
+
+    print(
+        "乃木坂取得件数:",
+        len(blogs)
+    )
 
 
     return blogs
