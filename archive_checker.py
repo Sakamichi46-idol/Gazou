@@ -1,5 +1,8 @@
+import aiohttp
+import traceback
+
 from archive_parsers.nogizaka import (
-    get_oldest_first as get_nogizaka
+    get_all_blog_urls as get_nogizaka
 )
 
 from archive_parsers.sakurazaka import (
@@ -18,61 +21,153 @@ from archive_config import (
     ARCHIVE_BATCH_SIZE
 )
 
+
+
 async def get_all_blogs():
     """
-    全グループのブログ取得（1つが失敗しても他を継続する）
+    全グループのブログ取得
+    1つ失敗しても他グループは継続
     """
+
     blogs = []
 
-    # グループ名と関数のペアで管理
+
     parsers = {
+
         "乃木坂46": get_nogizaka,
         "櫻坂46": get_sakurazaka,
         "日向坂46": get_hinatazaka
+
     }
 
-    for group_name, parser in parsers.items():
-        try:
-            print(f"[{group_name}] 巡回を開始します...")
-            # 各パーサーを非同期で実行
-            result = await parser()
 
-            if result:
-                blogs.extend(result)
-                print(f"[{group_name}] {len(result)} 件の記事を取得しました。")
-            else:
-                print(f"[{group_name}] 新しい記事は見つかりませんでした。")
 
-        except Exception as e:
-            # エラーが出てもここでキャッチしてログに出すので、次のグループの巡回は止まりません
-            print(f"【重要エラー】{group_name} の取得中にエラーが発生しました: {e}")
-            import traceback
-            traceback.print_exc() # エラーの詳しい原因をログに出力
+    async with aiohttp.ClientSession() as session:
+
+
+        for group_name, parser in parsers.items():
+
+            try:
+
+                print(
+                    f"[{group_name}] 巡回開始"
+                )
+
+
+                # =========================
+                # 乃木坂
+                # session渡し
+                # =========================
+                if group_name == "乃木坂46":
+
+                    result = await parser(
+                        session
+                    )
+
+
+                # =========================
+                # 櫻坂・日向坂
+                # 現状は内部session方式
+                # =========================
+                else:
+
+                    result = await parser()
+
+
+
+                if result:
+
+                    blogs.extend(
+                        result
+                    )
+
+
+                    print(
+                        f"[{group_name}] {len(result)}件取得"
+                    )
+
+
+                else:
+
+                    print(
+                        f"[{group_name}] 記事なし"
+                    )
+
+
+            except Exception as e:
+
+                print(
+                    f"【重要】{group_name}取得エラー:",
+                    e
+                )
+
+
+                traceback.print_exc()
+
+
 
     return blogs
 
 
+
+
+
 async def get_archive_targets():
     """
-    未アーカイブ記事を取得（古い順で返す）
+    未アーカイブ記事取得
+    古い順で返す
     """
+
+
     blogs = await get_all_blogs()
 
-    # 日付順にソート
-    blogs.sort(key=lambda x: x.get("date", ""))
+
+
+    blogs.sort(
+        key=lambda x: x.get(
+            "date",
+            ""
+        )
+    )
+
+
 
     targets = []
+
+
+
     for blog in blogs:
-        url = blog.get("url")
+
+
+        url = blog.get(
+            "url"
+        )
+
+
         if not url:
+
             continue
 
-        if is_archived(url):
+
+
+        if is_archived(
+            url
+        ):
+
             continue
 
-        targets.append(blog)
+
+
+        targets.append(
+            blog
+        )
+
+
 
         if len(targets) >= ARCHIVE_BATCH_SIZE:
+
             break
+
+
 
     return targets
