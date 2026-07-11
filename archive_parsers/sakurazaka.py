@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-from archive_parsers.utils import normalize_datetime
+from parsers.utils import normalize_datetime
 
 
 HEADERS = {
@@ -16,24 +16,10 @@ HEADERS = {
 }
 
 
-BASE_URL = "https://sakurazaka46.com"
-
-
-BLOG_LIST_URL = (
-    "https://sakurazaka46.com/"
-    "s/s46/diary/blog/list"
-)
-
-
-
-def get_blog_urls():
-
-    """
-    櫻坂46ブログURL一覧取得
-    """
+def get_sakurazaka_images(url):
 
     response = requests.get(
-        BLOG_LIST_URL,
+        url,
         headers=HEADERS,
         timeout=10
     )
@@ -43,186 +29,110 @@ def get_blog_urls():
 
     soup = BeautifulSoup(
         response.text,
-        "lxml"
+        "lxml"  # 💡 精度向上のため新着Botと同じくlxml（またはhtml.parser）を使用
     )
 
 
-    urls = []
+    blog = {
+        "group": "櫻坂46",
+        "member": "",
+        "title": "",
+        "date": "",
+        "url": url,
+        "images": []
+    }
 
 
-    for a in soup.select(
-        "a[href]"
-    ):
+    # =====================
+    # 💡 メンバー名（新着Botの構造に修正）
+    # =====================
+    member_tag = soup.select_one(".name")
+    if member_tag:
+        blog["member"] = member_tag.get_text(strip=True)
 
-        href = a.get(
-            "href"
+
+    # =====================
+    # 💡 タイトル（新着Botの構造に修正）
+    # =====================
+    title_tag = soup.select_one(".title")
+    if title_tag:
+        blog["title"] = title_tag.get_text(" ", strip=True)
+
+
+    # =====================
+    # 💡 日付・時間（新着Botの構造に修正＋時間も含むよう対応）
+    # =====================
+    date_tag = soup.select_one(".date")
+    if date_tag:
+        blog["date"] = normalize_datetime(date_tag.get_text(strip=True))
+
+
+    # =====================
+    # 本文（画像の抽出範囲）
+    # =====================
+    article = (
+        soup.select_one(".box-article")
+        or
+        soup.select_one(".blog-body")
+        or
+        soup.find("article")
+    )
+
+    if article is None:
+        article = soup
+
+
+
+    # =====================
+    # 画像取得
+    # =====================
+    seen = set()
+
+    for img in article.find_all("img"):
+
+        src = (
+            img.get("src")
+            or
+            img.get("data-src")
+            or
+            img.get("data-original")
         )
 
-
-        if not href:
+        if not src:
             continue
 
-
-        if "/diary/detail/" in href:
-
-            url = urljoin(
-                BASE_URL,
-                href
-            )
-
-
-            if url not in urls:
-
-                urls.append(url)
-
-
-    return urls
-
-
-
-
-def get_blog_list():
-
-    """
-    櫻坂46ブログ一覧取得
-    """
-
-
-    urls = get_blog_urls()
-
-
-    blogs = []
-
-
-    for url in urls:
-
-
-        try:
-
-            response = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=10
-            )
-
-
-            response.raise_for_status()
-
-
-            soup = BeautifulSoup(
-                response.text,
-                "lxml"
-            )
-
-
-            member = ""
-
-
-            member_tag = soup.select_one(
-                ".name"
-            )
-
-
-            if member_tag:
-
-                member = member_tag.get_text(
-                    strip=True
-                )
-
-
-
-            title = ""
-
-
-            title_tag = soup.select_one(
-                ".title"
-            )
-
-
-            if title_tag:
-
-                title = title_tag.get_text(
-                    " ",
-                    strip=True
-                )
-
-
-
-            date = ""
-
-
-            date_tag = soup.select_one(
-                ".date"
-            )
-
-
-            if date_tag:
-
-                date = normalize_datetime(
-                    date_tag.get_text(
-                        strip=True
-                    )
-                )
-
-
-
-            body = soup.select_one(
-                ".box-article"
-            )
-
-
-            text = (
-                str(body)
-                if body
-                else ""
-            )
-
-
-
-            blogs.append(
-                {
-                    "group": "櫻坂46",
-                    "url": url,
-                    "member": member,
-                    "title": title,
-                    "date": date,
-                    "text": text
-                }
-            )
-
-
-        except Exception as e:
-
-            print(
-                "櫻坂記事取得エラー:",
-                url,
-                e
-            )
-
-
-
-    return blogs
-
-
-
-
-
-def get_oldest_first():
-
-    """
-    古い順に並び替え
-    """
-
-
-    blogs = get_blog_list()
-
-
-    blogs.sort(
-        key=lambda x: x.get(
-            "date",
-            ""
-        )
+        image_url = urljoin(url, src)
+
+        # ロゴ・アイコン除外
+        if any(
+            x in image_url.lower()
+            for x in [
+                "logo",
+                "icon",
+                "header",
+                "footer"
+            ]
+        ):
+            continue
+
+        # 櫻坂ブログ画像判定
+        if (
+            "/files/" not in image_url
+            or
+            "diary" not in image_url
+        ):
+            continue
+
+        if image_url in seen:
+            continue
+
+        seen.add(image_url)
+        blog["images"].append(image_url)
+
+
+    print(
+        f"櫻坂ブログ解析完了: {blog['member']} - {blog['title']} (画像: {len(blog['images'])}枚)"
     )
 
 
-    return blogs
+    return blog
