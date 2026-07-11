@@ -1,6 +1,7 @@
 import os
 import asyncio
 import io
+import shutil  # 💡 リセット機能のために追加
 
 import aiohttp
 import discord
@@ -26,16 +27,13 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # チャンネル設定
 # =========================
 
-# 全記事を保存するアーカイブチャンネル
 ARCHIVE_ALL_CHANNEL = 1524064741016862883
-
-# メンバー別アーカイブチャンネル
 ARCHIVE_MEMBER_CHANNELS = {
-    # 例: "遠藤さくら": 123456789012345678,
+    # 必要に応じてここに追記
 }
 
 # =========================
-# 画像取得
+# 共通処理（画像取得・投稿先）
 # =========================
 
 async def download_image(url, index):
@@ -48,17 +46,12 @@ async def download_image(url, index):
         print("画像ダウンロードエラー:", e)
         return None
 
-# =========================
-# 投稿先取得
-# =========================
-
 def get_channels(member):
     channels = []
     if ARCHIVE_ALL_CHANNEL:
         channel = bot.get_channel(ARCHIVE_ALL_CHANNEL)
         if channel:
             channels.append(channel)
-
     member_channel_id = ARCHIVE_MEMBER_CHANNELS.get(member)
     if member_channel_id:
         channel = bot.get_channel(member_channel_id)
@@ -95,6 +88,21 @@ async def archive_start(ctx):
         await ctx.send("⚠️ アーカイブは既に動作中です。")
 
 @bot.command()
+@commands.is_owner()
+async def archive_reset(ctx):
+    """💡 データベースを削除して記憶をリセットするコマンド"""
+    if os.path.exists("data"):
+        try:
+            shutil.rmtree("data")
+            os.makedirs("data", exist_ok=True)
+            init_archive_db()
+            await ctx.send("🧹 データベースを削除して記憶をリセットしました！最初からアーカイブ可能です。")
+        except Exception as e:
+            await ctx.send(f"⚠️ リセットに失敗しました: {e}")
+    else:
+        await ctx.send("⚠️ データフォルダが見つかりません。")
+
+@bot.command()
 async def archive_status(ctx):
     if archive_loop.is_running():
         await ctx.send("🟢 現在、アーカイブ自動監視は【稼働中】です。")
@@ -103,6 +111,7 @@ async def archive_status(ctx):
 
 @archive_stop.error
 @archive_start.error
+@archive_reset.error
 async def archive_command_error(ctx, error):
     if isinstance(error, commands.NotOwner):
         await ctx.send("❌ このコマンドはBotの管理者のみ実行できます。")
@@ -127,7 +136,6 @@ async def archive_loop():
             member = blog.get("member", "")
             channels = get_channels(member)
             if not channels:
-                print("投稿先なし:", member)
                 continue
 
             image_urls = await get_images(blog["url"])
