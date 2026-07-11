@@ -21,8 +21,6 @@ from archive_image_getter import (
     get_images
 )
 
-# 💡 【修正】エラー原因だった keep_alive のインポートを削除しました
-
 from archive_config import (
     ARCHIVE_INTERVAL,
     SEND_DELAY
@@ -38,7 +36,9 @@ TOKEN = os.getenv(
 )
 
 
+# 💡 【カスタム】メッセージ内容の取得権限を追加し、警告を消しました
 intents = discord.Intents.default()
+intents.message_content = True
 
 
 bot = commands.Bot(
@@ -63,7 +63,6 @@ ARCHIVE_ALL_CHANNEL = 1524064741016862883
 ARCHIVE_MEMBER_CHANNELS = {
     # 例
     # "遠藤さくら": 123456789012345678,
-    # "賀喜遥香": 123456789012345678,
 }
 
 
@@ -228,46 +227,39 @@ async def archive_loop():
                 blog["url"]
             )
 
-            files = await create_files(
-                image_urls
-            )
+            # 💡 【カスタム】1枚目の画像をEmbed（埋め込み）内に大きく表示させるための設定
+            first_image_url = image_urls[0] if image_urls else None
 
+            # 💡 【カスタム】表示形式をリッチにデザイン
             embed = discord.Embed(
-                title=blog.get(
-                    "title",
-                    ""
-                ),
-                description=(
-                    blog.get(
-                        "date",
-                        ""
-                    )
-                    + "\n"
-                    + blog.get(
-                        "url",
-                        ""
-                    )
-                ),
+                title=blog.get("title", "無題"),
+                url=blog.get("url", ""),
                 color=0x00aaff
             )
 
-            embed.set_author(
-                name=member
-            )
+            # グループ名、メンバー名、投稿日時（時間込み）を綺麗に並べる
+            embed.add_field(name="🏷️ グループ", value=blog.get("group", "不明"), inline=True)
+            embed.add_field(name="👤 メンバー", value=member if member else "不明", inline=True)
+            embed.add_field(name="📅 投稿日時", value=blog.get("date", "不明"), inline=False)
+
+            if first_image_url:
+                embed.set_image(url=first_image_url)
 
             embed.set_footer(
-                text="Archive BOT"
+                text=f"Archive BOT • 画像総数: {len(image_urls)}枚"
             )
 
             # 全体＋個別へ送信
             for channel in channels:
-                send_files = await create_files(
-                    image_urls
-                )
+                # 2枚目以降の画像がある場合はファイルとして添付する準備
+                other_files = []
+                if len(image_urls) > 1:
+                    other_files = await create_files(image_urls[1:])
 
+                # 送信実行（Embedとファイルを一緒に送る）
                 await channel.send(
                     embed=embed,
-                    files=send_files
+                    files=other_files
                 )
 
                 await asyncio.sleep(
@@ -301,12 +293,6 @@ async def archive_loop():
                 e
             )
 
-
-# =========================
-# 起動
-# =========================
-
-# 💡 【修正】エラー原因だった keep_alive() の呼び出しを削除しました
 
 bot.run(
     TOKEN
