@@ -5,10 +5,8 @@ from urllib.parse import urljoin
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120 Safari/537.36"
     )
 }
@@ -38,58 +36,76 @@ def format_sakurazaka_date(date_text):
 
 def get_sakurazaka_images(url):
     """
-    指定されたURLのブログから詳細情報と画像一覧を取得する（アーカイブ用）
+    【新着Bot準拠】指定されたURLのブログ詳細ページから、
+    メンバー名、タイトル、正しい投稿日時、画像一覧を取得する
     """
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "lxml")
+        soup = BeautifulSoup(response.text, "html.parser")
     except Exception as e:
         print(f"櫻坂個別ページ取得エラー: {url} {e}")
-        return {"group": "櫻坂46", "member": "", "title": "", "date": "", "url": url, "images": []}
+        return {"group": "櫻坂46", "member": "", "title": "", "date": "不明", "url": url, "images": []}
 
     blog = {
         "group": "櫻坂46",
         "member": "",
         "title": "",
-        "date": "",
+        "date": "不明",
         "url": url,
         "images": []
     }
 
-    # メンバー名
-    member_tag = soup.select_one(".name")
-    if member_tag:
-        blog["member"] = member_tag.get_text(strip=True)
+    # =====================
+    # タイトル取得
+    # =====================
+    title = soup.find("h1", class_="title")
+    if not title:
+        title = soup.find("h1")
+    if title:
+        blog["title"] = title.get_text(strip=True)
 
-    # タイトル
-    title_tag = soup.select_one(".title")
-    if title_tag:
-        blog["title"] = title_tag.get_text(" ", strip=True)
+    # =====================
+    # メンバー名・投稿日時取得（.blog-foot から確実に取得）
+    # =====================
+    blog_foot = soup.find(class_="blog-foot")
+    if blog_foot:
+        # メンバー名
+        member = blog_foot.find("p", class_="name")
+        if member:
+            blog["member"] = member.get_text(strip=True)
 
-    # 日付・時間 (〇〇年〇〇月〇〇日 〇〇:◯◯ に整形)
-    date_tag = soup.select_one(".date")
-    if date_tag:
-        blog["date"] = format_sakurazaka_date(date_tag.get_text(strip=True))
+        # 投稿日時（ここが「11」になるのを防ぐため、詳細ページのフルな日時を取得）
+        date = blog_foot.find("p", class_="date")
+        if date:
+            raw_date = date.get_text(" ", strip=True)
+            blog["date"] = format_sakurazaka_date(raw_date)
 
+    # =====================
     # 本文（画像抽出用）
-    article = soup.select_one(".box-article") or soup.select_one(".blog-body") or soup.find("article")
+    # =====================
+    article = (
+        soup.find(class_="box-article")
+        or soup.find(class_="bd--edit")
+        or soup.find("article")
+        or soup.find("main")
+    )
     if article is None:
         article = soup
 
+    # =====================
     # 画像取得
+    # =====================
     seen = set()
     for img in article.find_all("img"):
-        src = img.get("src") or img.get("data-src") or img.get("data-original")
+        src = img.get("src")
         if not src:
             continue
 
         image_url = urljoin(url, src)
 
-        if any(x in image_url.lower() for x in ["logo", "icon", "header", "footer"]):
-            continue
-
-        if "/files/" not in image_url or "diary" not in image_url:
+        # 櫻坂ブログ画像判定
+        if "/files/" not in image_url:
             continue
 
         if image_url in seen:
@@ -102,39 +118,36 @@ def get_sakurazaka_images(url):
 
 def get_blog_urls():
     """
-    櫻坂46ブログURL一覧取得
+    櫻坂46ブログの最新URL一覧を記事一覧ページから取得
     """
     try:
         response = requests.get(BLOG_LIST_URL, headers=HEADERS, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "lxml")
+        soup = BeautifulSoup(response.text, "html.parser")
     except Exception as e:
         print(f"櫻坂一覧取得エラー: {e}")
         return []
 
     urls = []
-    for a in soup.select("a[href]"):
+    for a in soup.find_all("a", href=True):
         href = a.get("href")
-        if not href:
-            continue
-
         if "/diary/detail/" in href:
             url = urljoin(BASE_URL, href)
             if url not in urls:
                 urls.append(url)
     return urls
 
-# 💡 【重要】archive_checker.py が呼び出している関数を復活させました！
 def get_oldest_first():
     """
-    ブログ一覧を取得し、古い順に並び替えて返す（archive_checker用）
+    archive_checker.py から呼ばれるメイン関数。
+    新着URLを洗い出し、それぞれ詳細ページを見に行って正しい日時を取得し、古い順に並び替える。
     """
     urls = get_blog_urls()
     blogs = []
 
     for url in urls:
+        # 詳細ページを見に行って正しい日時やメンバー名を取得する
         blog_data = get_sakurazaka_images(url)
-        # 必要なキー構造を担保して追加
         blogs.append({
             "group": blog_data["group"],
             "url": blog_data["url"],
@@ -143,6 +156,6 @@ def get_oldest_first():
             "date": blog_data["date"]
         })
 
-    # 古い順にソート
+    # 正しい日時を使って古い順にソート
     blogs.sort(key=lambda x: x.get("date", ""))
     return blogs
