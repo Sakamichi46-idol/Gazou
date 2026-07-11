@@ -209,7 +209,8 @@ async def archive_loop():
         "アーカイブ確認"
     )
 
-    blogs = get_archive_targets()
+    # 💡 非同期関数になったため、await をつけて正しく呼び出し
+    blogs = await get_archive_targets()
 
     if not blogs:
         print(
@@ -217,8 +218,7 @@ async def archive_loop():
         )
         return
 
-    # 💡 【カスタム】取得した新着ブログを、日付（date）の古い順に並び替える
-    # 2026年07月11日 20:30 のような文字列でも、そのまま昇順で古い順ソートが可能です
+    # 💡 blogsがリストとして取得できているので、無事にソート可能になります
     blogs.sort(key=lambda x: x.get("date", ""))
 
     for blog in blogs:
@@ -239,8 +239,8 @@ async def archive_loop():
                 )
                 continue
 
-            # 画像URLのリストをすべて取得
-            image_urls = get_images(
+            # 💡 非同期関数になったため、await をつけて画像URLを取得
+            image_urls = await get_images(
                 blog["url"]
             )
 
