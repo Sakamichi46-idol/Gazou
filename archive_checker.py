@@ -1,8 +1,7 @@
 import aiohttp
-import traceback
 
 from archive_parsers.nogizaka import (
-    get_all_blog_urls as get_nogizaka
+    get_oldest_first as get_nogizaka
 )
 
 from archive_parsers.sakurazaka import (
@@ -22,27 +21,30 @@ from archive_config import (
 )
 
 
-
 async def get_all_blogs():
     """
     全グループのブログ取得
-    1つ失敗しても他グループは継続
+    1グループが失敗しても他は継続
     """
 
     blogs = []
 
 
     parsers = {
-
         "乃木坂46": get_nogizaka,
         "櫻坂46": get_sakurazaka,
         "日向坂46": get_hinatazaka
-
     }
 
 
+    timeout = aiohttp.ClientTimeout(
+        total=30
+    )
 
-    async with aiohttp.ClientSession() as session:
+
+    async with aiohttp.ClientSession(
+        timeout=timeout
+    ) as session:
 
 
         for group_name, parser in parsers.items():
@@ -54,25 +56,9 @@ async def get_all_blogs():
                 )
 
 
-                # =========================
-                # 乃木坂
-                # session渡し
-                # =========================
-                if group_name == "乃木坂46":
-
-                    result = await parser(
-                        session
-                    )
-
-
-                # =========================
-                # 櫻坂・日向坂
-                # 現状は内部session方式
-                # =========================
-                else:
-
-                    result = await parser()
-
+                result = await parser(
+                    session
+                )
 
 
                 if result:
@@ -81,11 +67,9 @@ async def get_all_blogs():
                         result
                     )
 
-
                     print(
                         f"[{group_name}] {len(result)}件取得"
                     )
-
 
                 else:
 
@@ -97,11 +81,10 @@ async def get_all_blogs():
             except Exception as e:
 
                 print(
-                    f"【重要】{group_name}取得エラー:",
-                    e
+                    f"[{group_name}] 取得エラー: {e}"
                 )
 
-
+                import traceback
                 traceback.print_exc()
 
 
@@ -110,17 +93,14 @@ async def get_all_blogs():
 
 
 
-
-
 async def get_archive_targets():
+
     """
-    未アーカイブ記事取得
+    未アーカイブ記事のみ取得
     古い順で返す
     """
 
-
     blogs = await get_all_blogs()
-
 
 
     blogs.sort(
@@ -131,13 +111,10 @@ async def get_archive_targets():
     )
 
 
-
     targets = []
 
 
-
     for blog in blogs:
-
 
         url = blog.get(
             "url"
@@ -145,17 +122,13 @@ async def get_archive_targets():
 
 
         if not url:
-
             continue
-
 
 
         if is_archived(
             url
         ):
-
             continue
-
 
 
         targets.append(
@@ -163,9 +136,7 @@ async def get_archive_targets():
         )
 
 
-
         if len(targets) >= ARCHIVE_BATCH_SIZE:
-
             break
 
 
