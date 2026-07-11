@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 
+
 HEADERS = {
 
     "User-Agent":
@@ -36,7 +37,7 @@ NG_WORDS = [
 def get_images(url):
 
     """
-    ブログ本文画像取得
+    ブログ記事内画像取得
     """
 
     try:
@@ -47,7 +48,9 @@ def get_images(url):
             timeout=15
         )
 
+
         response.raise_for_status()
+
 
 
         soup = BeautifulSoup(
@@ -56,10 +59,34 @@ def get_images(url):
         )
 
 
+
         images = []
 
 
-        for img in soup.select(
+
+        # 本文内画像優先
+
+        article = (
+            soup.select_one(
+                ".bd--article"
+            )
+            or
+            soup.select_one(
+                ".box-article"
+            )
+            or
+            soup.select_one(
+                ".c-blog-article__text"
+            )
+        )
+
+
+
+        target = article if article else soup
+
+
+
+        for img in target.select(
             "img"
         ):
 
@@ -82,12 +109,12 @@ def get_images(url):
 
 
 
-            lower_url = image_url.lower()
+            lower = image_url.lower()
 
 
 
             if any(
-                word in lower_url
+                word in lower
                 for word in NG_WORDS
             ):
 
@@ -95,10 +122,8 @@ def get_images(url):
 
 
 
-            # jpg/png/webpだけ
-
             if not any(
-                ext in lower_url
+                ext in lower
                 for ext in [
                     ".jpg",
                     ".jpeg",
@@ -120,9 +145,11 @@ def get_images(url):
 
 
         print(
-            "取得画像数:",
-            len(images)
+            "取得画像:",
+            len(images),
+            url
         )
+
 
 
         return images
