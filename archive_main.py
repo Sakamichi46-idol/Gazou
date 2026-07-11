@@ -2,10 +2,9 @@ import os
 import asyncio
 import io
 
+import aiohttp
 import discord
 from discord.ext import commands, tasks
-
-import aiohttp
 
 
 from archive_checker import (
@@ -21,10 +20,13 @@ from keep_alive import keep_alive
 
 
 
+# =========================
+# Discord設定
+# =========================
+
 TOKEN = os.getenv(
     "DISCORD_TOKEN"
 )
-
 
 
 intents = discord.Intents.default()
@@ -38,24 +40,39 @@ bot = commands.Bot(
 
 
 # =========================
-# メンバー別チャンネル設定
+# チャンネル設定
 # =========================
 
-ARCHIVE_CHANNELS = {
+# 全記事を保存するアーカイブチャンネル
+
+ARCHIVE_ALL_CHANNEL = 0
+
+
+
+# メンバー別アーカイブチャンネル
+
+ARCHIVE_MEMBER_CHANNELS = {
 
     # 例
-    # "遠藤さくら": 123456789012345678,
+    #
+    # "遠藤さくら":
+    #     123456789012345678,
+    #
+    # "賀喜遥香":
+    #     123456789012345678,
 
 }
 
 
 
 # =========================
-# 画像ダウンロード
+# 画像取得
 # =========================
 
 
-async def download_image(url):
+async def download_image(
+    url
+):
 
     try:
 
@@ -79,12 +96,105 @@ async def download_image(url):
     except Exception as e:
 
         print(
-            "画像DLエラー:",
+            "画像ダウンロードエラー:",
             e
         )
 
-
         return None
+
+
+
+
+async def create_files(
+    image_urls
+):
+
+    files = []
+
+
+    # Discord制限対策
+    # 最大5枚
+
+    for url in image_urls[:5]:
+
+
+        file = await download_image(
+            url
+        )
+
+
+        if file:
+
+            files.append(
+                file
+            )
+
+
+    return files
+
+
+
+
+
+# =========================
+# 投稿先取得
+# =========================
+
+
+def get_channels(
+    member
+):
+
+    channels = []
+
+
+
+    # 全体チャンネル
+
+    if ARCHIVE_ALL_CHANNEL:
+
+
+        channel = bot.get_channel(
+            ARCHIVE_ALL_CHANNEL
+        )
+
+
+        if channel:
+
+            channels.append(
+                channel
+            )
+
+
+
+    # 個別チャンネル
+
+    member_channel_id = (
+        ARCHIVE_MEMBER_CHANNELS.get(
+            member
+        )
+    )
+
+
+
+    if member_channel_id:
+
+
+        channel = bot.get_channel(
+            member_channel_id
+        )
+
+
+        if channel:
+
+            channels.append(
+                channel
+            )
+
+
+
+    return channels
+
 
 
 
@@ -97,12 +207,15 @@ async def download_image(url):
 @bot.event
 async def on_ready():
 
+
     print(
         f"ログイン成功: {bot.user}"
     )
 
 
-    archive_loop.start()
+    if not archive_loop.is_running():
+
+        archive_loop.start()
 
 
 
@@ -119,17 +232,24 @@ async def on_ready():
 async def archive_loop():
 
 
+    print(
+        "アーカイブ確認"
+    )
+
+
     blogs = get_archive_targets()
 
 
 
     if not blogs:
 
+
         print(
-            "アーカイブ対象なし"
+            "対象なし"
         )
 
         return
+
 
 
 
@@ -145,57 +265,38 @@ async def archive_loop():
             )
 
 
-            channel_id = ARCHIVE_CHANNELS.get(
+
+            channels = get_channels(
                 member
             )
 
 
-            if not channel_id:
+
+            if not channels:
+
 
                 print(
-                    "チャンネル未設定:",
+                    "投稿先なし:",
                     member
                 )
 
-                continue
-
-
-
-            channel = bot.get_channel(
-                channel_id
-            )
-
-
-
-            if not channel:
 
                 continue
 
 
 
-            images = get_images(
+
+            # 画像取得
+
+            image_urls = get_images(
                 blog["url"]
             )
 
 
 
-            files = []
-
-
-
-            for image_url in images[:5]:
-
-
-                file = await download_image(
-                    image_url
-                )
-
-
-                if file:
-
-                    files.append(
-                        file
-                    )
+            files = await create_files(
+                image_urls
+            )
 
 
 
@@ -230,18 +331,46 @@ async def archive_loop():
 
 
 
-            await channel.send(
-
-                embed=embed,
-
-                files=files
-
+            embed.set_footer(
+                text="Archive BOT"
             )
 
 
 
+
+            # 全体＋個別へ送信
+
+            for channel in channels:
+
+
+                await channel.send(
+
+                    embed=embed,
+
+                    files=files.copy()
+
+                )
+
+
+                await asyncio.sleep(
+                    1
+                )
+
+
+
+            # DB保存
+
             mark_archived(
                 blog
+            )
+
+
+
+            print(
+                "アーカイブ完了:",
+                blog.get(
+                    "title"
+                )
             )
 
 
@@ -252,11 +381,12 @@ async def archive_loop():
 
 
 
+
         except Exception as e:
 
 
             print(
-                "アーカイブ処理エラー:",
+                "アーカイブエラー:",
                 e
             )
 
