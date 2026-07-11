@@ -1,9 +1,6 @@
-import asyncio
-
 from archive_parsers.nogizaka import (
-    get_all_blog_urls as get_nogizaka
+    get_oldest_first as get_nogizaka
 )
-
 
 from archive_parsers.sakurazaka import (
     get_oldest_first as get_sakurazaka
