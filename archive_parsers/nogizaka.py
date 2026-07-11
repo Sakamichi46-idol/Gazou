@@ -1,8 +1,6 @@
 import aiohttp
+import re
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs
-
-from archive_parsers.utils import normalize_datetime
 
 
 HEADERS = {
@@ -16,81 +14,75 @@ HEADERS = {
 }
 
 
-BASE_URL = "https://www.nogizaka46.com"
-
-BLOG_LIST_URL = (
-    "https://www.nogizaka46.com/s/n46/diary/MEMBER?page={page}"
-)
-
-
-# ==========================
+# =========================
 # メンバー対応表
-# ==========================
+# =========================
 
 MEMBER_CT_MAP = {
 
-    "55396": "五百城茉央",
-    "55397": "池田瑛紗",
-    "55390": "一ノ瀬美空",
+    "55396": "五百城 茉央",
+    "55397": "池田 瑛紗",
+    "55390": "一ノ瀬 美空",
 
-    "36749": "伊藤理々杏",
-    "55389": "井上和",
-    "36750": "岩本蓮加",
+    "36749": "伊藤 理々杏",
+    "55389": "井上 和",
+    "36750": "岩本 蓮加",
 
-    "48006": "遠藤さくら",
-    "63102": "大越ひなの",
-    "55401": "岡本姫奈",
+    "48006": "遠藤 さくら",
+    "63102": "大越 ひなの",
 
-    "55392": "小川彩",
-    "55394": "奥田いろは",
-    "63103": "小津玲奈",
+    "55401": "岡本 姫奈",
+    "55392": "小川 彩",
+    "55394": "奥田 いろは",
 
-    "63104": "海邉朱莉",
+    "63103": "小津 玲奈",
+    "63104": "海邉 朱莉",
 
-    "48008": "賀喜遥香",
-    "48010": "金川紗耶",
+    "48008": "賀喜 遥香",
+    "48010": "金川 紗耶",
 
-    "55400": "川﨑桜",
-    "63105": "川端晃菜",
+    "55400": "川﨑 桜",
+    "63105": "川端 晃菜",
 
-    "55383": "黒見明香",
+    "55383": "黒見 明香",
 
-    "48013": "柴田柚菜",
-    "55391": "菅原咲月",
+    "48013": "柴田 柚菜",
 
-    "63106": "鈴木佑捺",
-    "63107": "瀬戸口心月",
+    "55391": "菅原 咲月",
 
-    "48015": "田村真佑",
-    "48017": "筒井あやめ",
+    "63106": "鈴木 佑捺",
+    "63107": "瀬戸口 心月",
 
-    "55393": "冨里奈央",
-    "63108": "長嶋凛桜",
+    "48015": "田村 真佑",
+    "48017": "筒井 あやめ",
 
-    "55395": "中西アルノ",
+    "55393": "冨里 奈央",
+    "63108": "長嶋 凛桜",
 
-    "55385": "林瑠奈",
+    "55395": "中西 アルノ",
 
-    "63109": "増田三莉音",
-    "63110": "森平麗心",
+    "55385": "林 瑠奈",
 
-    "63111": "矢田萌華",
+    "63109": "増田 三莉音",
+    "63110": "森平 麗心",
 
-    "55387": "弓木奈於",
+    "63111": "矢田 萌華",
 
-    "36759": "吉田綾乃クリスティー"
+    "55387": "弓木 奈於",
+
+    "36759": "吉田 綾乃クリスティー"
 }
 
 
 
-# ==========================
-# 期別
-# ==========================
+# =========================
+# 期生名
+# =========================
 
 GROUP_CT_MAP = {
 
-    "40004": "3期生",
-    "40005": "4期生",
+    "40004": "３期生",
+    "40005": "４期生",
     "40001": "新4期生",
     "40007": "5期生",
     "40008": "6期生"
@@ -99,224 +91,101 @@ GROUP_CT_MAP = {
 
 
 
-# ==========================
-# 除外対象
-# ==========================
+# =========================
+# 名前比較用
+# =========================
 
-STAFF_CT_LIST = {
+def normalize_name(text):
 
-    "40003"
+    if not text:
+        return ""
 
-}
-
-
-
-# ==========================
-# ct取得
-# ==========================
-
-def get_ct_from_url(url):
-
-    parsed = urlparse(url)
-
-    query = parse_qs(
-        parsed.query
+    # 空白類を全部削除
+    return re.sub(
+        r"\s+",
+        "",
+        text
     )
 
 
-    ct = query.get(
-        "ct"
-    )
+
+# =========================
+# タイトルから本人判定
+# =========================
+
+def detect_member_from_title(title):
+
+    normalized_title = normalize_name(title)
 
 
-    if ct:
-        return ct[0]
+    for member in MEMBER_CT_MAP.values():
+
+        normalized_member = normalize_name(member)
+
+
+        if normalized_member in normalized_title:
+
+            return member
 
 
     return None
 
 
 
-# ==========================
-# メンバー判定
-# ==========================
+# =========================
+# 名前取得
+# =========================
 
-def get_member_name(ct, title):
-
-
-    if not ct:
-        return "不明"
+def get_member_name(display_name, title):
 
 
-
-    # 運営スタッフ
-    if ct in STAFF_CT_LIST:
-
+    # 運営スタッフは除外
+    if "運営" in display_name:
         return None
 
 
+    # 普通のメンバー名
+    for member in MEMBER_CT_MAP.values():
 
-    # 個人ブログ
+        if normalize_name(member) == normalize_name(display_name):
 
-    if ct in MEMBER_CT_MAP:
+            return member
 
-        return MEMBER_CT_MAP[ct]
 
 
+    # 期生表示の場合
+    if display_name in GROUP_CT_MAP.values():
 
-    # 期別ブログ
+        return detect_member_from_title(title)
 
-    if ct in GROUP_CT_MAP:
 
 
-        clean_title = (
-            title
-            .replace(" ", "")
-            .replace("　", "")
-        )
+    # 判定不能
+    return None
 
 
-        for member in MEMBER_CT_MAP.values():
 
+# =========================
+# ブログ取得
+# =========================
 
-            clean_member = (
-                member
-                .replace(" ", "")
-                .replace("　", "")
-            )
+async def get_all_blog_urls(session):
 
 
-            if clean_member in clean_title:
+    print(
+        "[デバッグ] 乃木坂46 記事収集開始..."
+    )
 
-                return member
 
+    all_blogs = []
 
 
-        # タイトルで特定できなかった場合
-        return GROUP_CT_MAP[ct]
+    for page in range(1, 3):
 
 
-
-    return "不明"
-
-
-
-# ==========================
-# 詳細ページ取得
-# ==========================
-
-async def get_blog_detail(
-    session,
-    url
-):
-
-    blog = {
-
-        "group": "乃木坂46",
-        "url": url,
-        "member": "不明",
-        "title": "",
-        "date": ""
-
-    }
-
-
-    try:
-
-        async with session.get(
-            url,
-            headers=HEADERS,
-            timeout=10
-        ) as response:
-
-
-            html = await response.text()
-
-
-
-        soup = BeautifulSoup(
-            html,
-            "html.parser"
-        )
-
-
-
-        title_tag = soup.select_one(
-            "h1"
-        )
-
-
-        if title_tag:
-
-            blog["title"] = (
-                title_tag
-                .get_text(strip=True)
-            )
-
-
-
-        date_tag = soup.select_one(
-            "p.bd--hd__date"
-        )
-
-
-        if date_tag:
-
-            blog["date"] = normalize_datetime(
-                date_tag.get_text(strip=True)
-            )
-
-
-
-        ct = get_ct_from_url(
-            url
-        )
-
-
-        member = get_member_name(
-            ct,
-            blog["title"]
-        )
-
-
-        # 運営スタッフ除外
-
-        if member is None:
-
-            return None
-
-
-
-        blog["member"] = member
-
-
-
-    except Exception as e:
-
-        print(
-            "乃木坂詳細取得エラー:",
-            url,
-            e
-        )
-
-
-    return blog
-
-
-
-# ==========================
-# URL取得
-# ==========================
-
-async def get_blog_urls(session):
-
-    urls = []
-
-
-    for page in range(1, 20):
-
-        url = BLOG_LIST_URL.format(
-            page=page
+        url = (
+            "https://www.nogizaka46.com/"
+            f"s/n46/diary/MEMBER?page={page}"
         )
 
 
@@ -324,13 +193,11 @@ async def get_blog_urls(session):
 
             async with session.get(
                 url,
-                headers=HEADERS,
-                timeout=10
-            ) as response:
+                headers=HEADERS
+            ) as resp:
 
 
-                html = await response.text()
-
+                html = await resp.text()
 
 
             soup = BeautifulSoup(
@@ -339,96 +206,128 @@ async def get_blog_urls(session):
             )
 
 
+            posts = soup.select(
+                "div.m--postone"
+            )
 
-            for a in soup.select(
-                "a.m--postone__a"
-            ):
+
+            if not posts:
+
+                print(
+                    f"{page}ページ目 記事なし"
+                )
+
+                continue
 
 
-                href = a.get(
-                    "href"
+
+            for post in posts:
+
+
+                a_tag = post.select_one(
+                    "a.m--postone__a"
+                )
+
+                name_tag = post.select_one(
+                    "p.m--postone__name"
+                )
+
+                title_tag = post.select_one(
+                    "p.m--postone__ttl"
+                )
+
+                time_tag = post.select_one(
+                    "p.m--postone__time"
                 )
 
 
-                if not href:
+                if not (
+                    a_tag
+                    and name_tag
+                    and title_tag
+                    and time_tag
+                ):
 
                     continue
 
 
 
-                full_url = urljoin(
-                    BASE_URL,
-                    href
+                post_url = a_tag.get(
+                    "href"
+                )
+
+
+                if post_url.startswith("/"):
+
+                    post_url = (
+                        "https://www.nogizaka46.com"
+                        + post_url
+                    )
+
+
+
+                display_name = name_tag.get_text(
+                    strip=True
+                )
+
+
+                title = title_tag.get_text(
+                    strip=True
+                )
+
+
+                date = time_tag.get_text(
+                    strip=True
                 )
 
 
 
-                if full_url not in urls:
+                member = get_member_name(
+                    display_name,
+                    title
+                )
 
-                    urls.append(
-                        full_url
+
+                # 運営スタッフや判定不能は除外
+                if not member:
+
+                    print(
+                        f"除外: {display_name} - {title}"
                     )
+
+                    continue
+
+
+
+                all_blogs.append(
+                    {
+                        "group": "乃木坂46",
+                        "url": post_url,
+                        "date": date,
+                        "title": title,
+                        "member": member
+                    }
+                )
+
+
+                print(
+                    f"取得成功: {member} - {title}"
+                )
 
 
 
         except Exception as e:
 
             print(
-                "乃木坂一覧取得エラー:",
+                "乃木坂取得エラー:",
                 e
             )
 
 
-    return urls
-
-
-
-# ==========================
-# 最古順取得
-# ==========================
-
-async def get_oldest_first():
-
-
-    async with aiohttp.ClientSession() as session:
-
-
-        urls = await get_blog_urls(
-            session
-        )
-
-
-        blogs = []
-
-
-        for url in urls:
-
-
-            blog = await get_blog_detail(
-                session,
-                url
-            )
-
-
-            if blog:
-
-                blogs.append(
-                    blog
-                )
-
-
-
-    blogs.sort(
-        key=lambda x: x.get(
-            "date",
-            ""
-        )
-    )
-
 
     print(
-        f"乃木坂46取得件数: {len(blogs)}"
+        f"[デバッグ] 乃木坂46 収集完了 {len(all_blogs)}件"
     )
 
 
-    return blogs
+    return all_blogs
