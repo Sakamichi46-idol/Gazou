@@ -2,12 +2,11 @@ import re
 import aiohttp
 
 from bs4 import BeautifulSoup
-from urllib.parse  import urljoin
+from urllib.parse import urljoin
 
 
 HEADERS = {
-    "User-Agent":
-        "Mozilla/5.0"
+    "User-Agent": "Mozilla/5.0"
 }
 
 
@@ -15,7 +14,7 @@ BASE_URL = "https://www.nogizaka46.com"
 
 
 # =========================
-# メンバー名一覧
+# メンバー辞書
 # =========================
 
 MEMBER_NAMES = [
@@ -31,12 +30,9 @@ MEMBER_NAMES = [
     "岡本姫奈",
     "小川彩",
     "奥田いろは",
-    "小津玲奈",
-    "海邉朱莉",
     "賀喜遥香",
     "金川紗耶",
     "川﨑桜",
-    "川端晃菜",
     "黒見明香",
     "柴田柚菜",
     "菅原咲月",
@@ -66,14 +62,11 @@ def normalize_name(text):
     if not text:
         return ""
 
-    # 全角・半角スペース除去
-    text = re.sub(
+    return re.sub(
         r"\s+",
         "",
         text
     )
-
-    return text
 
 
 
@@ -81,21 +74,37 @@ def normalize_name(text):
 # メンバー判定
 # =========================
 
-def detect_member(title):
+def detect_member(
+    member_name,
+    title
+):
 
-    if not title:
+    if "運営スタッフ" in member_name:
         return None
 
 
-    normalized = normalize_name(
+    title = normalize_name(
         title
     )
 
 
     for name in MEMBER_NAMES:
 
-        if name in normalized:
+        if name in title:
             return name
+
+
+
+    member_name = normalize_name(
+        member_name
+    )
+
+
+    for name in MEMBER_NAMES:
+
+        if name == member_name:
+            return name
+
 
 
     return None
@@ -103,20 +112,26 @@ def detect_member(title):
 
 
 # =========================
-# ブログURL取得
+# ブログ取得
 # =========================
 
-async def get_all_blog_urls(session):
+async def get_all_blog_urls(
+    session
+):
 
     blogs = []
 
 
-    # 現在の乃木坂ブログ一覧
-    for page in range(1, 10):
+    for page in range(
+        1,
+        10
+    ):
+
 
         url = (
             "https://www.nogizaka46.com/"
-            f"s/n46/diary/MEMBER?ima=2155&page={page}"
+            "s/n46/diary/MEMBER"
+            f"?page={page}"
         )
 
 
@@ -124,39 +139,29 @@ async def get_all_blog_urls(session):
 
             async with session.get(
                 url,
-                headers=HEADERS
+                headers=HEADERS,
+                timeout=15
             ) as response:
+
 
                 html = await response.text()
 
 
-            # =========================
-            # デバッグ用
-            # js-apiglob確認
-            # =========================
 
-            index = html.find(
-                "js-apiglob"
+        except Exception as e:
+
+            print(
+                f"乃木坂取得エラー page={page}: {e}"
             )
 
-            if index != -1:
-
-                print(
-                    "js-apiglob周辺:",
-                    html[index:index+2000]
-                )
-
-            else:
-
-                print(
-        "js-apiglobが見つかりません"
-                )
+            continue
 
 
-            soup = BeautifulSoup(
-                html,
-                "html.parser"
-            )
+
+        soup = BeautifulSoup(
+            html,
+            "html.parser"
+        )
 
 
         posts = soup.select(
@@ -165,8 +170,7 @@ async def get_all_blog_urls(session):
 
 
         print(
-            f"乃木坂 page={page} 記事数:",
-            len(posts)
+            f"乃木坂 page={page} 記事数: {len(posts)}"
         )
 
 
@@ -178,14 +182,9 @@ async def get_all_blog_urls(session):
                 "href"
             )
 
+
             if not href:
                 continue
-
-
-            blog_url = urljoin(
-                BASE_URL,
-                href
-            )
 
 
 
@@ -199,6 +198,7 @@ async def get_all_blog_urls(session):
             )
 
 
+
             if not title_tag:
 
                 continue
@@ -210,27 +210,34 @@ async def get_all_blog_urls(session):
             )
 
 
+            date = (
+                date_tag.get_text(
+                    strip=True
+                )
+                if date_tag
+                else ""
+            )
+
+
+
+            blog_url = urljoin(
+                BASE_URL,
+                href
+            )
+
+
 
             member = detect_member(
+                "",
                 title
             )
 
 
 
-            # 判定不能は除外
+            # タイトルから判定できない場合は後で詳細ページ解析用
             if not member:
 
-                continue
-
-
-
-            date = ""
-
-            if date_tag:
-
-                date = date_tag.get_text(
-                    strip=True
-                )
+                member = "不明"
 
 
 
@@ -256,17 +263,9 @@ async def get_all_blog_urls(session):
             )
 
 
-            print(
-                "取得:",
-                member,
-                title
-            )
-
-
 
     print(
-        "乃木坂URL取得:",
-        len(blogs)
+        f"乃木坂URL取得: {len(blogs)}"
     )
 
 
@@ -274,17 +273,18 @@ async def get_all_blog_urls(session):
 
 
 
+
 # =========================
 # archive_checker用
 # =========================
 
-async def get_oldest_first():
+async def get_oldest_first(
+    session
+):
 
-    async with aiohttp.ClientSession() as session:
-
-        blogs = await get_all_blog_urls(
-            session
-        )
+    blogs = await get_all_blog_urls(
+        session
+    )
 
 
     blogs.sort(
