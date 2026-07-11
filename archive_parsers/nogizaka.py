@@ -7,7 +7,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-# メンバー辞書（ハードコード）
+# メンバー辞書
 MEMBER_CT_MAP = {
     "55396": "五百城 茉央", "55397": "池田 瑛紗", "55390": "一ノ瀬 美空",
     "36749": "伊藤 理々杏", "55389": "井上 和", "36750": "岩本 蓮加",
@@ -31,43 +31,33 @@ GROUP_CT_MAP = {
 member_cache = {}
 
 async def update_member_cache(session=None):
-    """固定の辞書データでキャッシュを更新"""
     member_cache.clear()
     member_cache.update(MEMBER_CT_MAP)
     member_cache.update(GROUP_CT_MAP)
     print(f"[デバッグ] 乃木坂46 辞書更新完了。全{len(member_cache)}件")
 
 def get_member_name_from_blog(ct, title):
-    """ctとタイトルからメンバー名を判定"""
-    if ct == "40003": return None  # 運営は除外
-    
-    # 個人ブログの場合
-    if ct in MEMBER_CT_MAP:
-        return MEMBER_CT_MAP[ct]
-    
-    # 期生ブログの場合、タイトルからメンバー名を検索
+    if ct == "40003": return None
+    if ct in MEMBER_CT_MAP: return MEMBER_CT_MAP[ct]
     if ct in GROUP_CT_MAP:
         for name in MEMBER_CT_MAP.values():
-            if name in title:
-                return name
+            if name in title: return name
     return None
 
 async def get_all_blog_urls(session):
-    """全ブログ記事のURLを収集する"""
     print("[デバッグ] 乃木坂46 記事収集開始...")
     all_blogs = []
     
     for ct, name in member_cache.items():
-        if ct == "40003": continue # 運営除外
+        if ct == "40003": continue
             
         url = f"https://www.nogizaka46.com/s/n46/diary/MEMBER/list?ct={ct}"
         try:
             async with session.get(url, headers=HEADERS) as resp:
                 html = await resp.text()
                 soup = BeautifulSoup(html, "html.parser")
-                
-                # 記事一覧の取得
                 posts = soup.select("div.m--postone")
+                
                 for post in posts:
                     a_tag = post.select_one("a.m--postone__a")
                     time_tag = post.select_one("p.m--postone__time")
@@ -75,6 +65,10 @@ async def get_all_blog_urls(session):
                     
                     if a_tag and time_tag and title_tag:
                         post_url = a_tag.get("href")
+                        # 相対パスなら補完する
+                        if post_url.startswith("/"):
+                            post_url = "https://www.nogizaka46.com" + post_url
+                            
                         post_time = time_tag.get_text(strip=True)
                         post_title = title_tag.get_text(strip=True)
                         
@@ -89,14 +83,13 @@ async def get_all_blog_urls(session):
         except Exception as e:
             print(f"エラー: {name} の取得中にエラー発生: {e}")
             
+    print(f"[デバッグ] 乃木坂46 収集完了。総数: {len(all_blogs)}件")
     return all_blogs
 
 async def get_blog_list(session):
-    """辞書更新と記事取得を実行"""
     await update_member_cache(session)
     return await get_all_blog_urls(session)
 
 async def get_oldest_first():
-    """他モジュールから呼び出されるエントリーポイント"""
     async with aiohttp.ClientSession() as session:
         return await get_blog_list(session)
