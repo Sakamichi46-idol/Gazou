@@ -1,9 +1,7 @@
 import os
 import asyncio
 import io
-import shutil  # 💡 リセット機能のために追加
-
-import aiohttp
+import shutil
 import discord
 from discord.ext import commands, tasks
 
@@ -15,25 +13,58 @@ from archive_config import ARCHIVE_INTERVAL, SEND_DELAY
 # =========================
 # Discord設定
 # =========================
-
 TOKEN = os.getenv("DISCORD_TOKEN")
-
 intents = discord.Intents.default()
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # =========================
 # チャンネル設定
 # =========================
 
+# 全体用
 ARCHIVE_ALL_CHANNEL = 1524064741016862883
+
+# グループ別（グループ名: チャンネルID）
+ARCHIVE_GROUP_CHANNELS = {
+    "日向坂46": 000000000000000000, 
+    "櫻坂46": 000000000000000000,
+    "乃木坂46": 000000000000000000,
+}
+
+# メンバー別（メンバー名: チャンネルID）
 ARCHIVE_MEMBER_CHANNELS = {
-    # 必要に応じてここに追記
+    "小坂菜緒": 000000000000000000,
 }
 
 # =========================
-# 共通処理（画像取得・投稿先）
+# 投稿先取得（3階層ロジック）
+# =========================
+
+def get_channels(blog):
+    channels = []
+    
+    # 1. 全体用
+    if ARCHIVE_ALL_CHANNEL:
+        channel = bot.get_channel(ARCHIVE_ALL_CHANNEL)
+        if channel: channels.append(channel)
+        
+    # 2. グループ用
+    group_channel_id = ARCHIVE_GROUP_CHANNELS.get(blog.get("group"))
+    if group_channel_id:
+        channel = bot.get_channel(group_channel_id)
+        if channel: channels.append(channel)
+        
+    # 3. メンバー用
+    member_channel_id = ARCHIVE_MEMBER_CHANNELS.get(blog.get("member"))
+    if member_channel_id:
+        channel = bot.get_channel(member_channel_id)
+        if channel: channels.append(channel)
+        
+    return channels
+
+# =========================
+# 共通処理
 # =========================
 
 async def download_image(url, index):
@@ -46,21 +77,8 @@ async def download_image(url, index):
         print("画像ダウンロードエラー:", e)
         return None
 
-def get_channels(member):
-    channels = []
-    if ARCHIVE_ALL_CHANNEL:
-        channel = bot.get_channel(ARCHIVE_ALL_CHANNEL)
-        if channel:
-            channels.append(channel)
-    member_channel_id = ARCHIVE_MEMBER_CHANNELS.get(member)
-    if member_channel_id:
-        channel = bot.get_channel(member_channel_id)
-        if channel:
-            channels.append(channel)
-    return channels
-
 # =========================
-# 起動・管理コマンド
+# コマンド群
 # =========================
 
 @bot.event
@@ -90,53 +108,32 @@ async def archive_start(ctx):
 @bot.command()
 @commands.is_owner()
 async def archive_reset(ctx):
-    """💡 データベースを削除して記憶をリセットするコマンド"""
     if os.path.exists("data"):
         try:
             shutil.rmtree("data")
             os.makedirs("data", exist_ok=True)
             init_archive_db()
-            await ctx.send("🧹 データベースを削除して記憶をリセットしました！最初からアーカイブ可能です。")
+            await ctx.send("🧹 データベースをリセットしました！最初からやり直せます。")
         except Exception as e:
-            await ctx.send(f"⚠️ リセットに失敗しました: {e}")
+            await ctx.send(f"⚠️ リセット失敗: {e}")
     else:
         await ctx.send("⚠️ データフォルダが見つかりません。")
 
-@bot.command()
-async def archive_status(ctx):
-    if archive_loop.is_running():
-        await ctx.send("🟢 現在、アーカイブ自動監視は【稼働中】です。")
-    else:
-        await ctx.send("🔴 現在、アーカイブ自動監視は【停止中】です。")
-
-@archive_stop.error
-@archive_start.error
-@archive_reset.error
-async def archive_command_error(ctx, error):
-    if isinstance(error, commands.NotOwner):
-        await ctx.send("❌ このコマンドはBotの管理者のみ実行できます。")
-
 # =========================
-# アーカイブ処理
+# アーカイブ実行ループ
 # =========================
 
 @tasks.loop(seconds=ARCHIVE_INTERVAL)
 async def archive_loop():
-    print("アーカイブ確認")
     blogs = await get_archive_targets()
-
-    if not blogs:
-        print("対象なし")
-        return
-
+    if not blogs: return
+    
     blogs.sort(key=lambda x: x.get("date", ""))
 
     for blog in blogs:
         try:
-            member = blog.get("member", "")
-            channels = get_channels(member)
-            if not channels:
-                continue
+            channels = get_channels(blog)
+            if not channels: continue
 
             image_urls = await get_images(blog["url"])
 
@@ -146,20 +143,19 @@ async def archive_loop():
                 color=0x00aaff
             )
             embed.add_field(name="🏷️ グループ", value=blog.get("group", "不明"), inline=True)
-            embed.add_field(name="👤 メンバー", value=member if member else "不明", inline=True)
+            embed.add_field(name="👤 メンバー", value=blog.get("member", "不明"), inline=True)
             embed.add_field(name="📅 投稿日時", value=blog.get("date", "不明"), inline=False)
             embed.set_footer(text=f"Archive BOT • 画像総数: {len(image_urls)}枚")
 
             for channel in channels:
                 await channel.send(embed=embed)
                 await asyncio.sleep(SEND_DELAY)
-
+                
                 if image_urls:
                     files = []
                     for index, url in enumerate(image_urls, start=1):
                         file = await download_image(url, index)
-                        if file:
-                            files.append(file)
+                        if file: files.append(file)
                         if len(files) == 10:
                             await channel.send(files=files)
                             files = []
@@ -168,17 +164,10 @@ async def archive_loop():
                         await channel.send(files=files)
                         await asyncio.sleep(SEND_DELAY)
 
-            save_archive(
-                blog.get("group", ""),
-                blog.get("member", ""),
-                blog.get("title", ""),
-                blog.get("date", ""),
-                blog.get("url", "")
-            )
-            print("アーカイブ完了:", blog.get("title", ""))
+            save_archive(blog.get("group", ""), blog.get("member", ""), blog.get("title", ""), blog.get("date", ""), blog.get("url", ""))
             await asyncio.sleep(SEND_DELAY)
 
         except Exception as e:
-            print("アーカイブエラー:", e)
+            print("エラー:", e)
 
 bot.run(TOKEN)
