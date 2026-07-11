@@ -51,16 +51,15 @@ async def get_all_blog_urls(session):
         url = f"https://www.nogizaka46.com/s/n46/diary/MEMBER/list?ct={ct}"
         try:
             async with session.get(url, headers=HEADERS) as resp:
-                html = await resp.text()
-                soup = BeautifulSoup(html, "html.parser")
-                
                 # --- デバッグ追加 ---
-                # 取得したページに記事リストの親要素があるか確認
-                has_list = soup.select_one("div.js-apiblog-list") is not None
-                if not has_list:
-                    print(f"[デバッグ] 警告: {name}(ct={ct}) のページに div.js-apiblog-list が見当たりません。")
+                print(f"[デバッグ] アクセス: {name}(ct={ct})")
+                print(f"[デバッグ] 最終アクセス先URL: {resp.url}")
+                
+                html = await resp.text()
+                print(f"[デバッグ] 取得HTMLサイズ: {len(html)}文字")
                 # ------------------
-
+                
+                soup = BeautifulSoup(html, "html.parser")
                 posts = soup.select("div.js-apiblog-list > div.m--postone")
                 
                 for post in posts:
