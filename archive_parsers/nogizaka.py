@@ -1,5 +1,4 @@
 import re
-import asyncio
 import aiohttp
 
 from bs4 import BeautifulSoup
@@ -7,25 +6,16 @@ from urllib.parse import urljoin
 
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "ja-JP,ja;q=0.9"
+    "User-Agent":
+        "Mozilla/5.0"
 }
+
 
 BASE_URL = "https://www.nogizaka46.com"
 
-BLOG_LIST_URL = (
-    "https://www.nogizaka46.com/"
-    "s/n46/diary/MEMBER?page={page}"
-)
-
 
 # =========================
-# メンバー一覧
+# メンバー名一覧
 # =========================
 
 MEMBER_NAMES = [
@@ -76,29 +66,35 @@ def normalize_name(text):
     if not text:
         return ""
 
-    return re.sub(
+    # 全角・半角スペース除去
+    text = re.sub(
         r"\s+",
         "",
         text
     )
 
+    return text
+
 
 
 # =========================
-# 作者判定
+# メンバー判定
 # =========================
 
-def detect_member(text):
+def detect_member(title):
+
+    if not title:
+        return None
+
 
     normalized = normalize_name(
-        text
+        title
     )
 
 
     for name in MEMBER_NAMES:
 
         if name in normalized:
-
             return name
 
 
@@ -107,25 +103,43 @@ def detect_member(text):
 
 
 # =========================
-# 個別記事から作者取得
+# ブログURL取得
 # =========================
 
-async def get_blog_detail(
-    session,
-    url
-):
+async def get_all_blog_urls(session):
 
-    try:
+    blogs = []
 
-        async with session.get(
-            url,
-            headers=HEADERS,
-            timeout=10
-        ) as response:
 
-            html = await response.text()
-            
-            print(html[:500])
+    # 現在の乃木坂ブログ一覧
+    for page in range(1, 10):
+
+        url = (
+            "https://www.nogizaka46.com/"
+            f"s/n46/diary/MEMBER?ima=2155&page={page}"
+        )
+
+
+        try:
+
+            async with session.get(
+                url,
+                headers=HEADERS
+            ) as response:
+
+                html = await response.text()
+
+
+
+        except Exception as e:
+
+            print(
+                "乃木坂ページ取得エラー:",
+                e
+            )
+
+            continue
+
 
 
         soup = BeautifulSoup(
@@ -134,15 +148,51 @@ async def get_blog_detail(
         )
 
 
-        # タイトル
-
-        title = ""
-
-        title_tag = soup.select_one(
-            "h1"
+        posts = soup.select(
+            "a.bl--card"
         )
 
-        if title_tag:
+
+        print(
+            f"乃木坂 page={page} 記事数:",
+            len(posts)
+        )
+
+
+
+        for post in posts:
+
+
+            href = post.get(
+                "href"
+            )
+
+            if not href:
+                continue
+
+
+            blog_url = urljoin(
+                BASE_URL,
+                href
+            )
+
+
+
+            title_tag = post.select_one(
+                "p.bl--card__ttl"
+            )
+
+
+            date_tag = post.select_one(
+                "p.bl--card__date"
+            )
+
+
+            if not title_tag:
+
+                continue
+
+
 
             title = title_tag.get_text(
                 strip=True
@@ -150,191 +200,66 @@ async def get_blog_detail(
 
 
 
-        # 作者取得
-
-        member = None
-
-
-        # 現在の乃木坂ブログ構造
-
-        for selector in [
-            ".bd--hd__name",
-            ".m--blog__name",
-            ".name",
-            "p.name"
-        ]:
-
-
-            tag = soup.select_one(
-                selector
-            )
-
-            if tag:
-
-                member = detect_member(
-                    tag.get_text(
-                        " ",
-                        strip=True
-                    )
-                )
-
-                if member:
-                    break
-
-
-
-        # 作者欄で取れない場合
-        # タイトルから判定
-
-        if not member:
-
             member = detect_member(
                 title
             )
 
 
 
-        # 運営スタッフ除外
+            # 判定不能は除外
+            if not member:
 
-        if "運営スタッフ" in title:
-
-            return None
-
+                continue
 
 
-        return {
 
-            "group":
-                "乃木坂46",
+            date = ""
 
-            "url":
-                url,
+            if date_tag:
 
-            "member":
+                date = date_tag.get_text(
+                    strip=True
+                )
+
+
+
+            blogs.append(
+                {
+
+                    "group":
+                        "乃木坂46",
+
+                    "url":
+                        blog_url,
+
+                    "member":
+                        member,
+
+                    "title":
+                        title,
+
+                    "date":
+                        date
+
+                }
+            )
+
+
+            print(
+                "取得:",
                 member,
-
-            "title":
-                title,
-
-        }
-
-
-    except Exception as e:
-
-        print(
-            "乃木坂個別取得エラー:",
-            url,
-            e
-        )
-
-        return None
-
-
-
-# =========================
-# URL一覧取得
-# =========================
-
-async def get_blog_urls(
-    session
-):
-
-    urls = []
-
-
-    for page in range(
-        1,
-        1000
-    ):
-
-
-        url = BLOG_LIST_URL.format(
-            page=page
-        )
-
-
-        try:
-
-            async with session.get(
-                url,
-                headers=HEADERS,
-                timeout=10
-            ) as response:
-
-                html = await response.text()
-
-
-
-            soup = BeautifulSoup(
-                html,
-                "html.parser"
+                title
             )
 
-
-            cards = soup.select(
-                "a.bl--card"
-            )
-
-
-            print(
-                f"乃木坂 page={page} 記事数:",
-                len(cards)
-            )
-
-
-            if not cards:
-
-                break
-
-
-
-            for card in cards:
-
-
-                href = card.get(
-                    "href"
-                )
-
-
-                if not href:
-                    continue
-
-
-
-                blog_url = urljoin(
-                    BASE_URL,
-                    href
-                )
-
-
-                if blog_url not in urls:
-
-                    urls.append(
-                        blog_url
-                    )
-
-
-
-            await asyncio.sleep(
-                0.5
-            )
-
-
-        except Exception as e:
-
-            print(
-                "乃木坂一覧取得エラー:",
-                e
-            )
 
 
     print(
         "乃木坂URL取得:",
-        len(urls)
+        len(blogs)
     )
 
 
-    return urls
+    return blogs
 
 
 
@@ -344,38 +269,11 @@ async def get_blog_urls(
 
 async def get_oldest_first():
 
-
-    blogs = []
-
-
     async with aiohttp.ClientSession() as session:
 
-
-        urls = await get_blog_urls(
+        blogs = await get_all_blog_urls(
             session
         )
-
-
-        for url in urls:
-
-
-            blog = await get_blog_detail(
-                session,
-                url
-            )
-
-
-            if blog:
-
-                blogs.append(
-                    blog
-                )
-
-
-            await asyncio.sleep(
-                0.5
-            )
-
 
 
     blogs.sort(
