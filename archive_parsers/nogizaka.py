@@ -124,6 +124,8 @@ async def get_blog_detail(
         ) as response:
 
             html = await response.text()
+            
+            print(html[:500])
 
 
         soup = BeautifulSoup(
