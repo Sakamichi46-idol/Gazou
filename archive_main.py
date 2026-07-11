@@ -14,9 +14,8 @@ from archive_checker import (
 
 from archive_database import (
     init_archive_db,
-    mark_archived
+    save_archive
 )
-
 
 from archive_image_getter import (
     get_images
@@ -372,11 +371,16 @@ async def archive_loop():
             for channel in channels:
 
 
+                send_files = await create_files(
+                    image_urls
+                )
+
+
                 await channel.send(
 
                     embed=embed,
 
-                    files=files.copy()
+                    files=send_files
 
                 )
 
@@ -391,10 +395,13 @@ async def archive_loop():
 
             # archive.db保存
 
-            mark_archived(
-                blog
+            save_archive(
+                blog.get("group", ""),
+                blog.get("member", ""),
+                blog.get("title", ""),
+                blog.get("date", ""),
+                blog.get("url", "")
             )
-
 
 
             print(
