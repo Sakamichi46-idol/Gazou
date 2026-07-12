@@ -29,15 +29,10 @@ async def get_all_blogs():
 
     blogs = []
 
-    timeout = aiohttp.ClientTimeout(total=30)
-
-    async with aiohttp.ClientSession(
-        timeout=timeout
-    ) as session:
+    async with aiohttp.ClientSession() as session:
 
         for group, parser in PARSERS.items():
 
-            print(f"\n========== {group} ==========")
             print(f"[{group}] 巡回開始")
 
             try:
@@ -48,30 +43,26 @@ async def get_all_blogs():
 
                     blogs.extend(result)
 
-                    print(
-                        f"[{group}] {len(result)}件取得"
-                    )
+                    print(f"[{group}] {len(result)}件取得")
 
                 else:
 
-                    print(
-                        f"[{group}] 記事なし"
-                    )
+                    print(f"[{group}] 記事なし")
 
-            except Exception:
+            except Exception as e:
 
-                print(
-                    f"[{group}] 巡回失敗"
-                )
+                print(f"{group}取得エラー: {e}")
 
                 traceback.print_exc()
 
-        print(
-            f"\n総取得件数: {len(blogs)}件"
-        )
+    # ===== 全グループまとめて時系列順 =====
+    blogs.sort(
+        key=lambda x: x.get("date", "")
+    )
+
+    print(f"全グループ合計: {len(blogs)}件")
 
     return blogs
-
 
 # =========================
 # archive_main用
