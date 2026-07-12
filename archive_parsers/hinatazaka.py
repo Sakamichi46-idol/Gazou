@@ -342,7 +342,7 @@ def parse_blog_card(
     )
 
 
-    member = (
+    member = normalize_member_name(
         member_tag.get_text(
             " ",
             strip=True
