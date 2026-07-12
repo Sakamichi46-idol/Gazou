@@ -4,34 +4,22 @@ import aiohttp
 from archive_parsers.nogizaka import (
     get_oldest_first as get_nogizaka
 )
-
 from archive_parsers.sakurazaka import (
     get_oldest_first as get_sakurazaka
 )
-
 from archive_parsers.hinatazaka import (
     get_oldest_first as get_hinatazaka
 )
-
 
 # =========================
 # パーサー一覧
 # =========================
 
 PARSERS = {
-
-    "乃木坂46":
-        get_nogizaka,
-
-    "櫻坂46":
-        get_sakurazaka,
-
-    "日向坂46":
-        get_hinatazaka
-
+    "乃木坂46": get_nogizaka,
+    "櫻坂46": get_sakurazaka,
+    "日向坂46": get_hinatazaka,
 }
-
-
 
 # =========================
 # 全ブログ取得
@@ -41,58 +29,46 @@ async def get_all_blogs():
 
     blogs = []
 
+    timeout = aiohttp.ClientTimeout(total=30)
 
-    async with aiohttp.ClientSession() as session:
-
+    async with aiohttp.ClientSession(
+        timeout=timeout
+    ) as session:
 
         for group, parser in PARSERS.items():
 
-
-            print(
-                f"[{group}] 巡回開始"
-            )
-
+            print(f"\n========== {group} ==========")
+            print(f"[{group}] 巡回開始")
 
             try:
 
-
-                result = await parser(
-                    session
-                )
-
+                result = await parser(session)
 
                 if result:
 
-
-                    blogs.extend(
-                        result
-                    )
-
+                    blogs.extend(result)
 
                     print(
                         f"[{group}] {len(result)}件取得"
                     )
 
-
                 else:
-
 
                     print(
                         f"[{group}] 記事なし"
                     )
 
-
-            except Exception as e:
-
+            except Exception:
 
                 print(
-                    f"{group}取得エラー: {e}"
+                    f"[{group}] 巡回失敗"
                 )
-
 
                 traceback.print_exc()
 
-
+        print(
+            f"\n総取得件数: {len(blogs)}件"
+        )
 
     return blogs
 
