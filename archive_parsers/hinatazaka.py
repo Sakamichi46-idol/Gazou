@@ -388,10 +388,34 @@ async def get_blog_list(session):
 
 async def get_oldest_first(session):
 
-    
+    blogs = []
 
-        blogs = await get_blog_list(
-            session
+    urls = await get_blog_urls(
+        session
+    )
+
+
+    for url in urls:
+
+        blog_data = await get_hinatazaka_images(
+            session,
+            url
+        )
+
+
+        blogs.append(
+            {
+                "group": blog_data["group"],
+                "url": blog_data["url"],
+                "member": blog_data["member"],
+                "title": blog_data["title"],
+                "date": blog_data["date"]
+            }
+        )
+
+
+        await asyncio.sleep(
+            0.5
         )
 
 
