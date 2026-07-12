@@ -1,5 +1,8 @@
 import asyncio
-from datetime import datetime
+from archive_parsers.utils import (
+    normalize_datetime,
+    normalize_member_name,
+)
 from urllib.parse import (
     parse_qs,
     urljoin,
@@ -308,7 +311,7 @@ def parse_blog_card(
     )
 
 
-    member = (
+    member = normalize_member_name(
         member_tag.get_text(
             " ",
             strip=True
