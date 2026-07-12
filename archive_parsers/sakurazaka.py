@@ -624,53 +624,288 @@ def extract_detail_datetime(
         "meta[property='article:published_time']",
         "meta[name='article:published_time']",
         "meta[property='og:published_time']",
-        "meta[itemprop='datePublished']",
+def extract_detail_datetime(
+    soup: BeautifulSoup,
+    fallback_date: str = ""
+) -> str:
+    """
+    櫻坂46の詳細ページから、
+    時刻付き投稿日時を取得する。
+
+    例:
+        2020/10/16 18:45
+            ↓
+        2020年10月16日 18:45
+    """
+
+    # =========================
+    # 1. 日時が入りやすい要素を優先
+    # =========================
+
+    selectors = (
+        "p.date.wf-a",
+        ".box-article p.date",
+        ".box-article .date.wf-a",
+        ".box-article .date",
+        ".blog-article p.date",
+        ".blog-article .date",
+        "time",
     )
 
-    for selector in attribute_selectors:
+    candidate_texts = []
+
+
+    for selector in selectors:
 
         for tag in soup.select(
             selector
         ):
 
-            raw_value = (
-                tag.get(
-                    "datetime",
-                    ""
-                )
-                or tag.get(
-                    "content",
-                    ""
-                )
+            # datetime属性も取得
+            datetime_attr = tag.get(
+                "datetime",
+                ""
             )
 
-            if not raw_value:
-                continue
+            if datetime_attr:
 
-            normalized = normalize_datetime(
-                raw_value
+                candidate_texts.append(
+                    datetime_attr
+                )
+
+
+            text = tag.get_text(
+                " ",
+                strip=True
             )
 
-            if (
-                normalized
-                and re.search(
-                    r"\d{1,2}:\d{2}",
-                    normalized
+            if text:
+
+                candidate_texts.append(
+                    text
                 )
-            ):
-
-                return normalized
 
 
-    # 時刻が取得できなかった場合は
-    # 一覧ページの日付をそのまま使用
-    fallback_normalized = normalize_datetime(
-        fallback_date
+    # =========================
+    # 2. metaタグを確認
+    # =========================
+
+    meta_selectors = (
+        "meta[property='article:published_time']",
+        "meta[name='article:published_time']",
+        "meta[property='og:published_time']",
+        "meta[name='date']",
+        "meta[itemprop='datePublished']",
     )
 
-    if fallback_normalized:
 
-        return fallback_normalized
+    for selector in meta_selectors:
+
+        for tag in soup.select(
+            selector
+        ):
+
+            content = tag.get(
+                "content",
+                ""
+            )
+
+            if content:
+
+                candidate_texts.append(
+                    content
+                )
+
+
+    # =========================
+    # 3. ページ全体も最後に確認
+    # =========================
+
+    page_text = soup.get_text(
+        " ",
+        strip=True
+    )
+
+    if page_text:
+
+        candidate_texts.append(
+            page_text
+        )
+
+
+    # =========================
+    # 4. 時刻付き日時を抽出
+    # =========================
+
+    patterns = (
+        # 2020/10/16 18:45
+        # 2020／10／16 18:45
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*[\/／]\s*"
+        r"(\d{1,2})"
+        r"\s*[\/／]\s*"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*[:：]\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+
+        # 2020.10.16 18:45
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*\.\s*"
+        r"(\d{1,2})"
+        r"\s*\.\s*"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*[:：]\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+
+        # 2020-10-16 18:45
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*-\s*"
+        r"(\d{1,2})"
+        r"\s*-\s*"
+        r"(\d{1,2})"
+        r"[T\s]+"
+        r"(\d{1,2})"
+        r"\s*[:：]\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+
+        # 2020年10月16日 18:45
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*年\s*"
+        r"(\d{1,2})"
+        r"\s*月\s*"
+        r"(\d{1,2})"
+        r"\s*日"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*[:：]\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+    )
+
+
+    for candidate in candidate_texts:
+
+        # 改行・タブ・連続空白を統一
+        cleaned_text = re.sub(
+            r"\s+",
+            " ",
+            candidate
+        ).strip()
+
+
+        for pattern in patterns:
+
+            match = re.search(
+                pattern,
+                cleaned_text
+            )
+
+            if not match:
+                continue
+
+
+            try:
+
+                parsed_datetime = datetime(
+                    int(match.group(1)),
+                    int(match.group(2)),
+                    int(match.group(3)),
+                    int(match.group(4)),
+                    int(match.group(5)),
+                )
+
+            except ValueError:
+
+                continue
+
+
+            result = parsed_datetime.strftime(
+                "%Y年%m月%d日 %H:%M"
+            )
+
+            return result
+
+
+    # =========================
+    # 5. 時刻なしの日付を整える
+    # =========================
+
+    fallback_patterns = (
+        # 2020年10月16日
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*年\s*"
+        r"(\d{1,2})"
+        r"\s*月\s*"
+        r"(\d{1,2})"
+        r"\s*日"
+        r"(?!\d)",
+
+        # 2020/10/16
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*[\/／]\s*"
+        r"(\d{1,2})"
+        r"\s*[\/／]\s*"
+        r"(\d{1,2})"
+        r"(?!\d)",
+
+        # 2020 10 16
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"(?!\d)",
+    )
+
+
+    fallback_text = (
+        fallback_date
+        or ""
+    )
+
+
+    for pattern in fallback_patterns:
+
+        match = re.search(
+            pattern,
+            fallback_text
+        )
+
+        if not match:
+            continue
+
+
+        try:
+
+            parsed_date = datetime(
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+            )
+
+        except ValueError:
+
+            continue
+
+
+        return parsed_date.strftime(
+            "%Y年%m月%d日"
+        )
+
 
     return fallback_date
 
