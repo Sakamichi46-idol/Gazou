@@ -154,40 +154,107 @@ async def get_blog_urls(session):
 
     return urls
 
-async def get_oldest_first(session):
+async def get_blog_urls(session):
 
-    blogs = []
+    urls = []
 
-    urls = await get_blog_urls(
-        session
+    max_page = await get_max_page(session)
+
+    print(
+        f"櫻坂46ブログの最古ページ番号: {max_page} から遡り巡回を開始します。"
     )
 
-    for url in urls:
 
-        blog_data = await get_sakurazaka_images(
-            session,
-            url
+    for page in range(max_page, -1, -1):
+
+        url = BLOG_LIST_BASE_URL.format(
+            page=page
         )
 
-        blogs.append(
-            {
-                "group": blog_data["group"],
-                "url": blog_data["url"],
-                "member": blog_data["member"],
-                "title": blog_data["title"],
-                "date": blog_data["date"]
-            }
-        )
+        try:
 
-        await asyncio.sleep(
-            0.5
-        )
+            timeout = aiohttp.ClientTimeout(
+                total=10
+            )
 
-    blogs.sort(
-        key=lambda x: x.get(
-            "date",
-            ""
-        )
+
+            async with session.get(
+                url,
+                headers=HEADERS,
+                timeout=timeout
+            ) as response:
+
+                response.raise_for_status()
+
+                html = await response.text()
+
+
+            soup = BeautifulSoup(
+                html,
+                "html.parser"
+            )
+
+
+            page_urls = []
+
+
+            for a in soup.find_all(
+                "a",
+                href=True
+            ):
+
+                href = a.get(
+                    "href"
+                )
+
+
+                if "/diary/detail/" in href:
+
+                    target_url = urljoin(
+                        BASE_URL,
+                        href
+                    )
+
+
+                    if (
+                        target_url not in page_urls
+                        and target_url not in urls
+                    ):
+
+                        page_urls.append(
+                            target_url
+                        )
+
+
+            page_urls.reverse()
+
+            urls.extend(
+                page_urls
+            )
+
+
+            print(
+                f"櫻坂 page={page}: {len(page_urls)}件 / 合計{len(urls)}件"
+            )
+
+
+            await asyncio.sleep(
+                0.5
+            )
+
+
+        except Exception as e:
+
+            print(
+                f"櫻坂一覧ページ(page={page})取得エラー: {e}"
+            )
+
+            continue
+
+
+    print(
+        f"櫻坂URL総取得: {len(urls)}"
     )
 
-    return blogs
+
+    return urls
