@@ -667,9 +667,11 @@ async def fill_missing_metadata(
 
         if member_tag:
 
-            blog["member"] = member_tag.get_text(
-                " ",
-                strip=True
+            blog["member"] = normalize_member_name(
+                member_tag.get_text(
+                    " ",
+                    strip=True
+                )
             )
 
 
