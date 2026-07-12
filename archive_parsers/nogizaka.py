@@ -3,6 +3,7 @@ import json
 import re
 
 from datetime import datetime
+from html import unescape
 from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
@@ -84,6 +85,512 @@ def normalize_blog_url(
 
 
 # =========================
+# 日時文字列を探す
+# =========================
+
+def find_datetime_in_text(
+    text: str,
+    require_time: bool = False
+) -> str:
+    """
+    文字列の中から日時を探して、
+
+        2026年05月26日 21:45
+
+    の形式で返す。
+
+    対応例:
+        2026.05.26 21:45
+        2026/05/26 21:45
+        2026-05-26 21:45
+        2026年05月26日 21:45
+    """
+
+    if not text:
+        return ""
+
+    text = unescape(
+        str(text)
+    )
+
+    text = text.replace(
+        "\u3000",
+        " "
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
+
+    # 時刻付き日時を最優先
+    time_match = re.search(
+        r"""
+        (?P<year>\d{4})
+        \s*
+        [./\-年]
+        \s*
+        (?P<month>\d{1,2})
+        \s*
+        [./\-月]
+        \s*
+        (?P<day>\d{1,2})
+        \s*
+        日?
+        \s*
+        (?P<hour>\d{1,2})
+        \s*
+        [:：]
+        \s*
+        (?P<minute>\d{2})
+        """,
+        text,
+        flags=re.VERBOSE
+    )
+
+
+    if time_match:
+
+        try:
+
+            year = int(
+                time_match.group("year")
+            )
+
+            month = int(
+                time_match.group("month")
+            )
+
+            day = int(
+                time_match.group("day")
+            )
+
+            hour = int(
+                time_match.group("hour")
+            )
+
+            minute = int(
+                time_match.group("minute")
+            )
+
+
+            value = datetime(
+                year,
+                month,
+                day,
+                hour,
+                minute
+            )
+
+
+            return value.strftime(
+                "%Y年%m月%d日 %H:%M"
+            )
+
+
+        except ValueError:
+
+            pass
+
+
+    if require_time:
+        return ""
+
+
+    # 日付のみ
+    date_match = re.search(
+        r"""
+        (?P<year>\d{4})
+        \s*
+        [./\-年]
+        \s*
+        (?P<month>\d{1,2})
+        \s*
+        [./\-月]
+        \s*
+        (?P<day>\d{1,2})
+        \s*
+        日?
+        """,
+        text,
+        flags=re.VERBOSE
+    )
+
+
+    if date_match:
+
+        try:
+
+            year = int(
+                date_match.group("year")
+            )
+
+            month = int(
+                date_match.group("month")
+            )
+
+            day = int(
+                date_match.group("day")
+            )
+
+
+            value = datetime(
+                year,
+                month,
+                day
+            )
+
+
+            return value.strftime(
+                "%Y年%m月%d日"
+            )
+
+
+        except ValueError:
+
+            pass
+
+
+    return ""
+
+
+# =========================
+# 日付部分を取得
+# =========================
+
+def get_date_only(
+    date_text: str
+) -> str:
+    """
+    2026年05月26日 21:45
+        ↓
+    2026年05月26日
+    """
+
+    if not date_text:
+        return ""
+
+    match = re.search(
+        r"\d{4}年\d{2}月\d{2}日",
+        date_text
+    )
+
+    if match:
+        return match.group(0)
+
+    normalized = normalize_datetime(
+        date_text
+    )
+
+    match = re.search(
+        r"\d{4}年\d{2}月\d{2}日",
+        normalized
+    )
+
+    if match:
+        return match.group(0)
+
+    return ""
+
+
+# =========================
+# 詳細ページの日時取得
+# =========================
+
+def extract_detail_datetime(
+    soup: BeautifulSoup,
+    html: str,
+    fallback_date: str = ""
+) -> str:
+    """
+    詳細ページから時刻付き日時を取得する。
+
+    取得順:
+    1. 日付・時刻用要素
+    2. 日付要素の親要素
+    3. 記事ヘッダー
+    4. metaタグ
+    5. timeタグのdatetime属性
+    6. HTML全体
+
+    APIの日付と同じ日の時刻付き日時を優先する。
+    """
+
+    fallback_day = get_date_only(
+        fallback_date
+    )
+
+    candidates = []
+
+
+    def add_candidate(
+        value
+    ):
+
+        if not value:
+            return
+
+        value = str(
+            value
+        ).strip()
+
+        if not value:
+            return
+
+        if value not in candidates:
+            candidates.append(
+                value
+            )
+
+
+    # -------------------------
+    # 日付・時刻要素
+    # -------------------------
+
+    selectors = (
+        ".bd--hd__date",
+        ".bd--hd__time",
+        ".bd--date",
+        ".bd--time",
+        ".bd--hd time",
+        ".bd--hd__in",
+        ".bd--hd",
+        ".bd--header",
+        ".blog-date",
+        ".blog-time",
+        "time",
+    )
+
+
+    for selector in selectors:
+
+        for tag in soup.select(
+            selector
+        ):
+
+            add_candidate(
+                tag.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+
+            # datetime属性
+            add_candidate(
+                tag.get(
+                    "datetime",
+                    ""
+                )
+            )
+
+
+            # content属性
+            add_candidate(
+                tag.get(
+                    "content",
+                    ""
+                )
+            )
+
+
+            # 親要素に日付と時刻が
+            # 分かれている場合に対応
+            if tag.parent:
+
+                add_candidate(
+                    tag.parent.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+
+    # -------------------------
+    # metaタグ
+    # -------------------------
+
+    meta_selectors = (
+        "meta[property='article:published_time']",
+        "meta[name='article:published_time']",
+        "meta[property='og:published_time']",
+        "meta[name='date']",
+        "meta[name='publish_date']",
+        "meta[itemprop='datePublished']",
+    )
+
+
+    for selector in meta_selectors:
+
+        for tag in soup.select(
+            selector
+        ):
+
+            add_candidate(
+                tag.get(
+                    "content",
+                    ""
+                )
+            )
+
+
+    # -------------------------
+    # JSON-LD
+    # -------------------------
+
+    for script in soup.select(
+        "script[type='application/ld+json']"
+    ):
+
+        script_text = script.string
+
+        if not script_text:
+            continue
+
+
+        try:
+
+            json_data = json.loads(
+                script_text
+            )
+
+
+            json_items = (
+                json_data
+                if isinstance(
+                    json_data,
+                    list
+                )
+                else [json_data]
+            )
+
+
+            for item in json_items:
+
+                if not isinstance(
+                    item,
+                    dict
+                ):
+
+                    continue
+
+
+                add_candidate(
+                    item.get(
+                        "datePublished",
+                        ""
+                    )
+                )
+
+                add_candidate(
+                    item.get(
+                        "dateCreated",
+                        ""
+                    )
+                )
+
+
+        except Exception:
+
+            # JSONとして読めなくても
+            # 文字列内の日時を候補にする
+            add_candidate(
+                script_text
+            )
+
+
+    # -------------------------
+    # HTML全体
+    # -------------------------
+
+    add_candidate(
+        html
+    )
+
+
+    # -------------------------
+    # 1. 同じ日＋時刻ありを優先
+    # -------------------------
+
+    for candidate in candidates:
+
+        found = find_datetime_in_text(
+            candidate,
+            require_time=True
+        )
+
+
+        if not found:
+            continue
+
+
+        found_day = get_date_only(
+            found
+        )
+
+
+        if (
+            fallback_day
+            and found_day == fallback_day
+        ):
+
+            return found
+
+
+    # -------------------------
+    # 2. 日付指定なしで時刻付きを探す
+    # -------------------------
+
+    for candidate in candidates:
+
+        found = find_datetime_in_text(
+            candidate,
+            require_time=True
+        )
+
+
+        if found:
+            return found
+
+
+    # -------------------------
+    # 3. 時刻なしの日付
+    # -------------------------
+
+    for candidate in candidates:
+
+        found = find_datetime_in_text(
+            candidate,
+            require_time=False
+        )
+
+
+        if not found:
+            continue
+
+
+        found_day = get_date_only(
+            found
+        )
+
+
+        if (
+            fallback_day
+            and found_day == fallback_day
+        ):
+
+            return found
+
+
+    # 最後はAPI側の日付を使う
+    return normalize_datetime(
+        fallback_date
+    )
+
+
+# =========================
 # APIレスポンス解析
 # =========================
 
@@ -122,7 +629,7 @@ def parse_api_response(
             return None
 
 
-    # 通常のJSON形式にも対応
+    # 通常JSON形式
     try:
 
         return json.loads(
@@ -233,31 +740,18 @@ def convert_item(
 
 
     return {
-
-        "group":
-            "乃木坂46",
-
-        "url":
-            blog_url,
-
-        "member":
-            member,
-
-        "title":
-            item.get(
-                "title",
-                ""
-            ) or "",
-
-        "date":
-            date,
-
-        "text":
-            item.get(
-                "text",
-                ""
-            ) or ""
-
+        "group": "乃木坂46",
+        "url": blog_url,
+        "member": member,
+        "title": item.get(
+            "title",
+            ""
+        ) or "",
+        "date": date,
+        "text": item.get(
+            "text",
+            ""
+        ) or ""
     }
 
 
@@ -352,35 +846,38 @@ async def enrich_blog_detail(
             # 投稿日時
             # -------------------------
 
-            date_tag = (
-                soup.select_one(
-                    ".bd--hd__date"
-                )
-                or soup.select_one(
-                    ".bd--date"
-                )
-                or soup.select_one(
-                    "time"
-                )
+            original_date = blog.get(
+                "date",
+                ""
             )
 
 
-            if date_tag:
+            detail_date = extract_detail_datetime(
+                soup,
+                html,
+                original_date
+            )
 
-                raw_date = date_tag.get_text(
-                    " ",
-                    strip=True
+
+            if detail_date:
+
+                blog["date"] = detail_date
+
+
+            # 時刻取得状況をログ表示
+            if re.search(
+                r"\d{2}:\d{2}",
+                blog.get(
+                    "date",
+                    ""
                 )
+            ):
 
+                datetime_status = "時刻取得成功"
 
-                detail_date = normalize_datetime(
-                    raw_date
-                )
+            else:
 
-
-                if detail_date:
-
-                    blog["date"] = detail_date
+                datetime_status = "時刻なし"
 
 
             # -------------------------
@@ -444,6 +941,7 @@ async def enrich_blog_detail(
                 f"{index}/{total}: "
                 f"{blog.get('date', '不明')} / "
                 f"{blog.get('member', '不明')} / "
+                f"{datetime_status} / "
                 f"{url}"
             )
 
@@ -499,21 +997,13 @@ async def enrich_all_details(
     ):
 
         tasks.append(
-
             enrich_blog_detail(
-
                 session,
-
                 semaphore,
-
                 blog,
-
                 index,
-
                 len(blogs)
-
             )
-
         )
 
 
@@ -552,8 +1042,27 @@ async def enrich_all_details(
             )
 
 
+    time_count = sum(
+        1
+        for blog in enriched_blogs
+        if re.search(
+            r"\d{2}:\d{2}",
+            blog.get(
+                "date",
+                ""
+            )
+        )
+    )
+
+
     print(
         f"乃木坂 詳細日時取得完了: "
+        f"{len(enriched_blogs)}件"
+    )
+
+    print(
+        f"乃木坂 時刻取得成功: "
+        f"{time_count}/"
         f"{len(enriched_blogs)}件"
     )
 
@@ -574,7 +1083,7 @@ async def test_pagination(
     )
 
 
-    second_items, second_data = await fetch_api_items(
+    second_items, _ = await fetch_api_items(
         session,
         params={
             "page": 2
@@ -583,38 +1092,30 @@ async def test_pagination(
 
 
     first_urls = [
-
         normalize_blog_url(
             item.get(
                 "link",
                 ""
             )
         )
-
         for item in first_items
-
         if item.get(
             "link"
         )
-
     ]
 
 
     second_urls = [
-
         normalize_blog_url(
             item.get(
                 "link",
                 ""
             )
         )
-
         for item in second_items
-
         if item.get(
             "link"
         )
-
     ]
 
 
@@ -677,13 +1178,9 @@ async def test_pagination(
 
 
     metadata_keys = [
-
         key
-
         for key in first_data.keys()
-
         if key != "data"
-
     ]
 
 
@@ -742,8 +1239,8 @@ async def get_all_blog_urls(
     )
 
 
-    # page=2が同一内容の場合、
-    # 重複取得を避けて最初の100件だけ使う
+    # page=2が同一内容なら
+    # 最初の100件だけ使用する
     if same_result:
 
         source_items = first_items
@@ -752,8 +1249,7 @@ async def get_all_blog_urls(
 
         source_items = (
             first_items
-            +
-            second_items
+            + second_items
         )
 
 
@@ -770,7 +1266,6 @@ async def get_all_blog_urls(
 
 
         if not blog:
-
             continue
 
 
@@ -781,12 +1276,10 @@ async def get_all_blog_urls(
 
 
         if not blog_url:
-
             continue
 
 
         if blog_url in seen_urls:
-
             continue
 
 
@@ -831,15 +1324,10 @@ def datetime_key(
 
 
     formats = (
-
         "%Y年%m月%d日 %H:%M",
-
         "%Y年%m月%d日",
-
         "%Y-%m-%d %H:%M",
-
         "%Y-%m-%d",
-
     )
 
 
