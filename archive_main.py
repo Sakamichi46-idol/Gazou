@@ -575,259 +575,132 @@ async def archive_reset(ctx):
 # アーカイブ本体
 # =========================
 
-@tasks.loop(
-    seconds=ARCHIVE_INTERVAL
-)
+@tasks.loop(seconds=ARCHIVE_INTERVAL)
 async def archive_loop():
 
-
+    # 未アーカイブ記事取得
     blogs = await get_archive_targets()
 
-
     if not blogs:
-
+        print("アーカイブ対象なし")
         return
 
+    # 一番古い記事だけ処理
+    blog = blogs[0]
 
-
-    blogs.sort(
-        key=lambda x: x.get(
-            "date",
-            ""
-        )
+    print(
+        f"送信開始: "
+        f"{blog['group']} "
+        f"{blog['member']} "
+        f"{blog['date']}"
     )
 
+    try:
 
+        channels = get_channels(blog)
 
-    async with aiohttp.ClientSession() as session:
+        if not channels:
 
+            print("送信先なし")
+            return
 
-        for blog in blogs:
+        image_urls = await get_images(
+            blog["url"]
+        )
 
+        embed = discord.Embed(
+            title=blog["title"],
+            url=blog["url"],
+            color=0x00AEEF
+        )
 
-            try:
+        embed.add_field(
+            name="グループ",
+            value=blog["group"],
+            inline=True
+        )
 
+        embed.add_field(
+            name="メンバー",
+            value=blog["member"],
+            inline=True
+        )
 
-                channels = get_channels(
-                    blog
+        embed.add_field(
+            name="投稿日",
+            value=blog["date"],
+            inline=False
+        )
+
+        embed.set_footer(
+            text=f"画像 {len(image_urls)}枚"
+        )
+
+        async with aiohttp.ClientSession() as session:
+
+            for channel in channels:
+
+                await channel.send(
+                    embed=embed
                 )
-
-
-                if not channels:
-
-                    print(
-                        "送信先なし:",
-                        blog
-                    )
-
-                    continue
-
-
-
-
-                image_urls = await get_images(
-                    blog["url"]
-                )
-
-
-
-
-                embed = discord.Embed(
-
-                    title=blog.get(
-                        "title",
-                        "無題"
-                    ),
-
-                    url=blog.get(
-                        "url",
-                        ""
-                    ),
-
-                    color=0x00aaff
-
-                )
-
-
-
-                embed.add_field(
-
-                    name="🏷️ グループ",
-
-                    value=blog.get(
-                        "group",
-                        "不明"
-                    ),
-
-                    inline=True
-
-                )
-
-
-
-                embed.add_field(
-
-                    name="👤 メンバー",
-
-                    value=blog.get(
-                        "member",
-                        "不明"
-                    ),
-
-                    inline=True
-
-                )
-
-
-
-                embed.add_field(
-
-                    name="📅 投稿日時",
-
-                    value=blog.get(
-                        "date",
-                        "不明"
-                    ),
-
-                    inline=False
-
-                )
-
-
-
-                embed.set_footer(
-
-                    text=f"Archive BOT • 画像総数 {len(image_urls)}枚"
-
-                )
-
-
-
-
-
-                for channel in channels:
-
-
-                    await channel.send(
-                        embed=embed
-                    )
-
-
-                    await asyncio.sleep(
-                        SEND_DELAY
-                    )
-
-
-
-                    if image_urls:
-
-
-                        files = []
-
-
-                        for index, url in enumerate(
-                            image_urls,
-                            start=1
-                        ):
-
-
-                            file = await download_image(
-
-                                session,
-
-                                url,
-
-                                index
-
-                            )
-
-
-                            if file:
-
-                                files.append(
-                                    file
-                                )
-
-
-
-                            # Discord添付10枚制限対応
-
-                            if len(files) == 10:
-
-
-                                await channel.send(
-                                    files=files
-                                )
-
-
-                                files = []
-
-
-                                await asyncio.sleep(
-                                    SEND_DELAY
-                                )
-
-
-
-
-                        if files:
-
-
-                            await channel.send(
-                                files=files
-                            )
-
-
-                            await asyncio.sleep(
-                                SEND_DELAY
-                            )
-
-
-
-
-                save_archive(
-
-                    blog.get(
-                        "group",
-                        ""
-                    ),
-
-                    blog.get(
-                        "member",
-                        ""
-                    ),
-
-                    blog.get(
-                        "title",
-                        ""
-                    ),
-
-                    blog.get(
-                        "date",
-                        ""
-                    ),
-
-                    blog.get(
-                        "url",
-                        ""
-                    )
-
-                )
-
 
                 await asyncio.sleep(
                     SEND_DELAY
                 )
 
+                files = []
 
+                for index, url in enumerate(
+                    image_urls,
+                    start=1
+                ):
 
-            except Exception as e:
+                    file = await download_image(
+                        session,
+                        url,
+                        index
+                    )
 
+                    if file:
+                        files.append(file)
 
-                print(
-                    "アーカイブ処理エラー:",
-                    e
-                )
+                    # Discordは10枚まで
+                    if len(files) == 10:
+
+                        await channel.send(
+                            files=files
+                        )
+
+                        files = []
+
+                        await asyncio.sleep(
+                            SEND_DELAY
+                        )
+
+                if files:
+
+                    await channel.send(
+                        files=files
+                    )
+
+                    await asyncio.sleep(
+                        SEND_DELAY
+                    )
+
+        # 成功したら保存
+        save_archive(blog)
+
+        print(
+            "保存完了:",
+            blog["url"]
+        )
+
+    except Exception as e:
+
+        print(
+            "アーカイブ送信エラー:",
+            e
+        )
 
 
 
