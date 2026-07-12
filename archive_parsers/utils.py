@@ -3,12 +3,16 @@ import re
 
 def normalize_datetime(date_str: str) -> str:
     """
-    日付を統一フォーマットへ変換する。
+    日付をソートしやすい統一フォーマットへ変換する。
 
     例
     2026.7.10 17:56
         ↓
-    2026年07月10日 17:56
+    2026-07-10 17:56
+
+    2026年7月10日
+        ↓
+    2026-07-10
     """
 
     if not date_str:
@@ -24,21 +28,21 @@ def normalize_datetime(date_str: str) -> str:
     if not match:
         return date_str
 
-    year = match.group(1)
+    year = int(match.group(1))
     month = int(match.group(2))
     day = int(match.group(3))
     time = match.group(4)
 
     if time:
         return (
-            f"{year}年"
-            f"{month:02d}月"
-            f"{day:02d}日 "
+            f"{year:04d}-"
+            f"{month:02d}-"
+            f"{day:02d} "
             f"{time}"
         )
 
     return (
-        f"{year}年"
-        f"{month:02d}月"
-        f"{day:02d}日"
+        f"{year:04d}-"
+        f"{month:02d}-"
+        f"{day:02d}"
     )
