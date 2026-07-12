@@ -501,18 +501,19 @@ async def get_oldest_first(session):
 
     blogs = []
 
-    urls = await get_blog_urls(
-        session
-    )
+    urls = await get_blog_urls(session)
 
+    print(f"日向坂46 {len(urls)}件取得")
 
-    for url in urls:
+    for index, url in enumerate(urls, start=1):
 
         blog_data = await get_hinatazaka_images(
             session,
             url
         )
 
+        if not blog_data:
+            continue
 
         blogs.append(
             {
@@ -524,18 +525,17 @@ async def get_oldest_first(session):
             }
         )
 
+        if index % 100 == 0:
+            print(
+                f"日向坂 詳細取得 {index}/{len(urls)}"
+            )
 
-        await asyncio.sleep(
-            0.5
-        )
-
+        await asyncio.sleep(0.5)
 
     blogs.sort(
-        key=lambda x: x.get(
-            "date",
-            ""
-        )
+        key=lambda x: x["date"]
     )
 
+    print(f"日向坂 総取得 {len(blogs)}件")
 
     return blogs
