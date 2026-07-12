@@ -379,7 +379,118 @@ async def get_blog_list(session):
 
     return blogs
 
+async def get_hinatazaka_images(session, url):
 
+    timeout = aiohttp.ClientTimeout(total=10)
+
+    try:
+
+        async with session.get(
+            url,
+            headers=HEADERS,
+            timeout=timeout
+        ) as response:
+
+            response.raise_for_status()
+            html = await response.text()
+
+    except Exception as e:
+
+        print(
+            "日向坂記事取得エラー:",
+            url,
+            e
+        )
+
+        return {
+            "group": "日向坂46",
+            "member": "",
+            "title": "",
+            "date": "不明",
+            "url": url,
+            "images": []
+        }
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+    blog = {
+        "group": "日向坂46",
+        "member": "",
+        "title": "",
+        "date": "不明",
+        "url": url,
+        "images": []
+    }
+
+    title = soup.select_one(
+        ".c-blog-article__title"
+    )
+
+    if title:
+
+        blog["title"] = title.get_text(
+            strip=True
+        )
+
+    member = soup.select_one(
+        ".c-blog-article__name"
+    )
+
+    if member:
+
+        blog["member"] = member.get_text(
+            strip=True
+        )
+
+    date = soup.select_one(
+        ".c-blog-article__date time"
+    )
+
+    if date:
+
+        blog["date"] = normalize_datetime(
+            date.get_text(strip=True)
+        )
+
+    body = (
+        soup.select_one(".c-blog-article__text")
+        or soup
+    )
+
+    seen = set()
+
+    for img in body.find_all("img"):
+
+        src = img.get("src")
+
+        if not src:
+            continue
+
+        image_url = urljoin(
+            url,
+            src
+        )
+
+        if "/files/" not in image_url:
+            continue
+
+        if image_url in seen:
+            continue
+
+        seen.add(image_url)
+
+        blog["images"].append(
+            image_url
+        )
+
+    print(
+        f"取得画像数: {len(blog['images'])} {url}"
+    )
+
+    return blog
 
 
 # =========================
