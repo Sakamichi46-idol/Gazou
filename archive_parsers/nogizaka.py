@@ -124,14 +124,13 @@ async def get_all_blog_urls(
 
     for page in range(
         1,
-        10
+        143
     ):
-
 
         url = (
             "https://www.nogizaka46.com/"
             "s/n46/diary/MEMBER"
-            f"?page={page}&ima=2155"
+            f"?ima=2155&page={page}"
         )
 
 
@@ -143,9 +142,7 @@ async def get_all_blog_urls(
                 timeout=15
             ) as response:
 
-
                 html = await response.text()
-
 
 
         except Exception as e:
@@ -162,14 +159,20 @@ async def get_all_blog_urls(
             html,
             "html.parser"
         )
+
+
+        # デバッグ確認
+        blog_area = soup.select_one(
+            ".ba--all"
+        )
+
         print(
-            "乃木坂HTML blog確認:",
-            "bl--card" in html
+            f"乃木坂HTML blog確認: {blog_area is not None}"
         )
 
 
         posts = soup.select(
-            "a.bl--card"
+            "a.m--postone__a"
         )
 
 
@@ -193,18 +196,22 @@ async def get_all_blog_urls(
 
 
             title_tag = post.select_one(
-                "p.bl--card__ttl"
+                "p.m--postone__ttl"
             )
 
 
             date_tag = post.select_one(
-                "p.bl--card__date"
+                "p.m--postone__time"
+            )
+
+
+            member_tag = post.select_one(
+                "p.m--postone__name"
             )
 
 
 
             if not title_tag:
-
                 continue
 
 
@@ -223,6 +230,15 @@ async def get_all_blog_urls(
             )
 
 
+            member = (
+                member_tag.get_text(
+                    strip=True
+                )
+                if member_tag
+                else ""
+            )
+
+
 
             blog_url = urljoin(
                 BASE_URL,
@@ -231,17 +247,15 @@ async def get_all_blog_urls(
 
 
 
-            member = detect_member(
-                "",
+            detected_member = detect_member(
+                member,
                 title
             )
 
 
+            if not detected_member:
 
-            # タイトルから判定できない場合は後で詳細ページ解析用
-            if not member:
-
-                member = "不明"
+                detected_member = "不明"
 
 
 
@@ -255,7 +269,7 @@ async def get_all_blog_urls(
                         blog_url,
 
                     "member":
-                        member,
+                        detected_member,
 
                     "title":
                         title,
@@ -274,7 +288,6 @@ async def get_all_blog_urls(
 
 
     return blogs
-
 
 
 
