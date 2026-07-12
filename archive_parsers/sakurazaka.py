@@ -1,8 +1,5 @@
 import asyncio
-from archive_parsers.utils import (
-    normalize_datetime,
-    normalize_member_name,
-)
+from datetime import datetime
 from urllib.parse import (
     parse_qs,
     urljoin,
@@ -13,7 +10,10 @@ from urllib.parse import (
 import aiohttp
 from bs4 import BeautifulSoup
 
-from archive_parsers.utils import normalize_datetime
+from archive_parsers.utils import (
+    normalize_datetime,
+    normalize_member_name,
+)
 
 
 BASE_URL = "https://sakurazaka46.com"
