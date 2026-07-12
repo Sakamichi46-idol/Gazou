@@ -287,7 +287,10 @@ def get_channels(blog):
     channels = []
     seen = set()
 
-    # 全体チャンネル
+    # -------------------------
+    # 1. 全体チャンネル
+    # -------------------------
+
     if ARCHIVE_ALL_CHANNEL:
 
         channel = bot.get_channel(
@@ -295,24 +298,53 @@ def get_channels(blog):
         )
 
         if channel:
-            channels.append(channel)
-            seen.add(channel.id)
 
-    # グループチャンネル
-    group = blog.get("group")
+            channels.append(
+                channel
+            )
 
-    group_channel = ARCHIVE_GROUP_CHANNELS.get(group)
+            seen.add(
+                channel.id
+            )
 
-    if group_channel:
 
-        channel = bot.get_channel(group_channel)
+    # -------------------------
+    # 2. グループチャンネル
+    # -------------------------
 
-        if channel and channel.id not in seen:
+    group = blog.get(
+        "group",
+        ""
+    )
 
-            channels.append(channel)
-            seen.add(channel.id)
+    group_channel_id = ARCHIVE_GROUP_CHANNELS.get(
+        group
+    )
 
-    # メンバーチャンネル
+    if group_channel_id:
+
+        channel = bot.get_channel(
+            group_channel_id
+        )
+
+        if (
+            channel
+            and channel.id not in seen
+        ):
+
+            channels.append(
+                channel
+            )
+
+            seen.add(
+                channel.id
+            )
+
+
+    # -------------------------
+    # 3. メンバーチャンネル
+    # -------------------------
+
     member = normalize_member_name(
         blog.get(
             "member",
@@ -324,17 +356,46 @@ def get_channels(blog):
         member
     )
 
-    if member_channel:
+    if member_channel_id:
 
-        channel = bot.get_channel(member_channel)
+        channel = bot.get_channel(
+            member_channel_id
+        )
 
-        if channel and channel.id not in seen:
+        if (
+            channel
+            and channel.id not in seen
+        ):
 
-            channels.append(channel)
-            seen.add(channel.id)
+            channels.append(
+                channel
+            )
+
+            seen.add(
+                channel.id
+            )
+
+            print(
+                f"メンバー別チャンネル取得成功: "
+                f"{member} / {channel.id}"
+            )
+
+        else:
+
+            print(
+                f"メンバー別チャンネル取得失敗: "
+                f"{member} / {member_channel_id}"
+            )
+
+    else:
+
+        print(
+            "メンバー別チャンネル未設定:",
+            repr(member)
+        )
+
 
     return channels
-
 
 # =========================
 # 画像ダウンロード
