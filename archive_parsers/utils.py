@@ -17,7 +17,6 @@ def normalize_datetime(
     の形式へ統一する。
 
     対応例:
-
         2026.7.10 17:56
         2026/7/10 17:56
         2026-07-10 17:56
@@ -33,13 +32,11 @@ def normalize_datetime(
         date_str
     ).strip()
 
-
-    # 全角スペースなどを通常スペースへ
+    # 全角スペースを半角スペースへ
     date_str = date_str.replace(
         "\u3000",
         " "
     )
-
 
     # 連続する空白を1つへ
     date_str = re.sub(
@@ -47,7 +44,6 @@ def normalize_datetime(
         " ",
         date_str
     )
-
 
     match = re.search(
         r"""
@@ -75,7 +71,6 @@ def normalize_datetime(
         flags=re.VERBOSE
     )
 
-
     if not match:
 
         print(
@@ -85,25 +80,18 @@ def normalize_datetime(
 
         return date_str
 
-
     try:
 
         year = int(
-            match.group(
-                "year"
-            )
+            match.group("year")
         )
 
         month = int(
-            match.group(
-                "month"
-            )
+            match.group("month")
         )
 
         day = int(
-            match.group(
-                "day"
-            )
+            match.group("day")
         )
 
         hour_text = match.group(
@@ -114,14 +102,12 @@ def normalize_datetime(
             "minute"
         )
 
-
         # 日付として有効か確認
         datetime(
             year,
             month,
             day
         )
-
 
         if (
             hour_text is not None
@@ -136,7 +122,6 @@ def normalize_datetime(
                 minute_text
             )
 
-
             # 時刻として有効か確認
             datetime(
                 year,
@@ -146,7 +131,6 @@ def normalize_datetime(
                 minute
             )
 
-
             return (
                 f"{year:04d}年"
                 f"{month:02d}月"
@@ -155,13 +139,11 @@ def normalize_datetime(
                 f"{minute:02d}"
             )
 
-
         return (
             f"{year:04d}年"
             f"{month:02d}月"
             f"{day:02d}日"
         )
-
 
     except ValueError:
 
@@ -181,7 +163,6 @@ def parse_datetime(
     date_str: str
 ) -> datetime:
     """
-    normalize_datetime()で統一された日時を、
     ソート用のdatetimeへ変換する。
 
     解析できない日時は最後へ送るため、
@@ -189,14 +170,11 @@ def parse_datetime(
     """
 
     if not date_str:
-
         return datetime.max
-
 
     normalized = normalize_datetime(
         date_str
     )
-
 
     formats = (
         "%Y年%m月%d日 %H:%M",
@@ -209,7 +187,6 @@ def parse_datetime(
         "%Y.%m.%d",
     )
 
-
     for date_format in formats:
 
         try:
@@ -220,15 +197,12 @@ def parse_datetime(
             )
 
         except ValueError:
-
             continue
-
 
     print(
         "日時解析失敗:",
         date_str
     )
-
 
     return datetime.max
 
@@ -241,9 +215,11 @@ def blog_datetime_key(
     blog: dict
 ) -> datetime:
     """
-    blogs.sort(key=blog_datetime_key)
+    使用例:
 
-    の形で使う。
+        blogs.sort(
+            key=blog_datetime_key
+        )
     """
 
     return parse_datetime(
@@ -262,7 +238,7 @@ def clean_text(
     text: str
 ) -> str:
     """
-    メンバー名やタイトル内の余分な空白を整理する。
+    タイトルなどの余分な空白を整理する。
     """
 
     if not text:
@@ -283,25 +259,43 @@ def clean_text(
 
 
 # =========================
-# メンバー名の空白除去
+# メンバー名の正規化
 # =========================
 
 def normalize_member_name(
     name: str
 ) -> str:
     """
-    例:
+    メンバー名に含まれる空白や改行をすべて削除する。
 
-        冨里 奈央
+    例:
+        池田 瑛紗
+        池田　瑛紗
+        池田   瑛紗
             ↓
-        冨里奈央
+        池田瑛紗
+
+        田村 保乃
+            ↓
+        田村保乃
+
+        正源司 陽子
+            ↓
+        正源司陽子
     """
 
     if not name:
         return ""
 
-    return re.sub(
-        r"\s+",
-        "",
-        str(name)
+    name = str(
+        name
     )
+
+    # 改行・タブ・半角空白・全角空白をすべて削除
+    name = re.sub(
+        r"[\s\u3000]+",
+        "",
+        name
+    )
+
+    return name.strip()
