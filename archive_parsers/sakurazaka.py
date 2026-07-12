@@ -510,194 +510,169 @@ def extract_detail_datetime(
     fallback_date: str = ""
 ) -> str:
     """
-    詳細ページから時刻付き日時を取得する。
+    櫻坂46の詳細ページから
+    時刻付き投稿日時を取得する。
 
     例:
-        2020/10/18 20:15
+        2020/10/16 18:45
             ↓
-        2020年10月18日 20:15
+        2020年10月16日 18:45
     """
 
-    candidates = []
-
-
-    def add_candidate(
-        value
-    ):
-
-        if not value:
-            return
-
-        value = re.sub(
-            r"\s+",
-            " ",
-            str(value).replace(
-                "\u3000",
-                " "
-            )
-        ).strip()
-
-        if (
-            value
-            and value not in candidates
-        ):
-
-            candidates.append(
-                value
-            )
-
-
-    selectors = (
-        "p.date.wf-a",
-        ".box-article p.date.wf-a",
-        ".box-article .date.wf-a",
-        ".blog-article p.date.wf-a",
-        ".date.wf-a",
-        "p.date",
-        "time",
+    # ページ内の全テキストから
+    # YYYY/MM/DD HH:MM を直接探す。
+    #
+    # 詳細ページ上部には
+    # 「2020 10」「16」のような分割日付があるため、
+    # p.dateなどの最初の要素だけを使わない。
+    page_text = soup.get_text(
+        " ",
+        strip=True
     )
 
+    datetime_patterns = (
+        # 2020/10/16 18:45
+        r"\b"
+        r"(\d{4})"
+        r"\s*/\s*"
+        r"(\d{1,2})"
+        r"\s*/\s*"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*:\s*"
+        r"(\d{2})"
+        r"\b",
 
-    for selector in selectors:
+        # 2020.10.16 18:45
+        r"\b"
+        r"(\d{4})"
+        r"\s*\.\s*"
+        r"(\d{1,2})"
+        r"\s*\.\s*"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*:\s*"
+        r"(\d{2})"
+        r"\b",
 
-        for tag in soup.select(
-            selector
-        ):
+        # 2020年10月16日 18:45
+        r"(\d{4})"
+        r"\s*年\s*"
+        r"(\d{1,2})"
+        r"\s*月\s*"
+        r"(\d{1,2})"
+        r"\s*日\s*"
+        r"(\d{1,2})"
+        r"\s*:\s*"
+        r"(\d{2})",
+    )
 
-            add_candidate(
-                tag.get_text(
-                    " ",
-                    strip=True
-                )
+    for pattern in datetime_patterns:
+
+        match = re.search(
+            pattern,
+            page_text
+        )
+
+        if not match:
+            continue
+
+        year = int(
+            match.group(1)
+        )
+
+        month = int(
+            match.group(2)
+        )
+
+        day = int(
+            match.group(3)
+        )
+
+        hour = int(
+            match.group(4)
+        )
+
+        minute = int(
+            match.group(5)
+        )
+
+        try:
+
+            parsed_datetime = datetime(
+                year,
+                month,
+                day,
+                hour,
+                minute
             )
 
-            add_candidate(
-                tag.get(
-                    "datetime",
-                    ""
-                )
-            )
+        except ValueError:
 
-            add_candidate(
-                tag.get(
-                    "content",
-                    ""
-                )
-            )
+            continue
 
-            if tag.parent:
-
-                add_candidate(
-                    tag.parent.get_text(
-                        " ",
-                        strip=True
-                    )
-                )
+        return parsed_datetime.strftime(
+            "%Y年%m月%d日 %H:%M"
+        )
 
 
-    meta_selectors = (
+    # metaタグやdatetime属性も確認
+    attribute_selectors = (
+        "time[datetime]",
         "meta[property='article:published_time']",
         "meta[name='article:published_time']",
         "meta[property='og:published_time']",
         "meta[itemprop='datePublished']",
-        "meta[name='date']",
     )
 
-
-    for selector in meta_selectors:
+    for selector in attribute_selectors:
 
         for tag in soup.select(
             selector
         ):
 
-            add_candidate(
+            raw_value = (
                 tag.get(
+                    "datetime",
+                    ""
+                )
+                or tag.get(
                     "content",
                     ""
                 )
             )
 
+            if not raw_value:
+                continue
 
-    # 時刻付き日時を優先
-    for candidate in candidates:
-
-        detail_date = normalize_datetime(
-            candidate
-        )
-
-        if re.search(
-            r"\d{2}:\d{2}",
-            detail_date
-        ):
-
-            return detail_date
-
-
-    # 年月日と時刻が別要素の場合
-    year_tag = (
-        soup.select_one(
-            ".ym-year"
-        )
-        or soup.select_one(
-            ".year"
-        )
-    )
-
-    month_tag = (
-        soup.select_one(
-            ".ym-month"
-        )
-        or soup.select_one(
-            ".month"
-        )
-    )
-
-    day_time_tag = (
-        soup.select_one(
-            "p.date.wf-a"
-        )
-        or soup.select_one(
-            "p.date"
-        )
-    )
-
-
-    if (
-        year_tag
-        and month_tag
-        and day_time_tag
-    ):
-
-        combined = (
-            year_tag.get_text(
-                " ",
-                strip=True
+            normalized = normalize_datetime(
+                raw_value
             )
-            + " "
-            + month_tag.get_text(
-                " ",
-                strip=True
-            )
-            + " "
-            + day_time_tag.get_text(
-                " ",
-                strip=True
-            )
-        )
 
-        combined_date = normalize_datetime(
-            combined
-        )
+            if (
+                normalized
+                and re.search(
+                    r"\d{1,2}:\d{2}",
+                    normalized
+                )
+            ):
 
-        if combined_date:
-
-            return combined_date
+                return normalized
 
 
-    # 時刻が見つからない場合は一覧の日付
-    return normalize_datetime(
+    # 時刻が取得できなかった場合は
+    # 一覧ページの日付をそのまま使用
+    fallback_normalized = normalize_datetime(
         fallback_date
     )
+
+    if fallback_normalized:
+
+        return fallback_normalized
+
+    return fallback_date
 
 
 # =========================
