@@ -1,72 +1,52 @@
 import os
-import asyncio
 import io
 import shutil
+import asyncio
 import aiohttp
 
 import discord
 from discord.ext import commands, tasks
 
-
 from archive_checker import get_archive_targets
-
 from archive_database import (
     init_archive_db,
     save_archive
 )
-
 from archive_image_getter import get_images
-
 from archive_config import (
     ARCHIVE_INTERVAL,
     SEND_DELAY
 )
 
-
-
 # =========================
 # Discord設定
 # =========================
 
-TOKEN = os.getenv(
-    "DISCORD_TOKEN"
-)
-
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
-
 intents.message_content = True
-
 
 bot = commands.Bot(
     command_prefix="!",
     intents=intents
 )
 
-
-
 # =========================
 # チャンネル設定
 # =========================
 
-
-# 全体用
-
 ARCHIVE_ALL_CHANNEL = 1525522665614606427
-
-
-
-# グループ別
 
 ARCHIVE_GROUP_CHANNELS = {
 
-    "日向坂46": 1525523279660580904,
-
+    "乃木坂46": 1525523279660580904,
     "櫻坂46": 1525523343644561418,
-
-    "乃木坂46": 1525523279660580904
+    "日向坂46": 1525523279660580904
 
 }
+
+
 
 
 
