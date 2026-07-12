@@ -62,7 +62,7 @@ async def get_all_blogs():
 
     print(f"全グループ合計: {len(blogs)}件")
 
-    return blogs
+    return blogs[:20]
 
 # =========================
 # archive_main用
