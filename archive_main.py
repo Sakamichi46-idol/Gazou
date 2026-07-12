@@ -18,6 +18,10 @@ from archive_config import (
     SEND_DELAY
 )
 
+from archive_parsers.utils import (
+    normalize_member_name
+)
+
 # =========================
 # Discord設定
 # =========================
@@ -309,9 +313,16 @@ def get_channels(blog):
             seen.add(channel.id)
 
     # メンバーチャンネル
-    member = blog.get("member")
+    member = normalize_member_name(
+        blog.get(
+            "member",
+            ""
+        )
+    )
 
-    member_channel = ARCHIVE_MEMBER_CHANNELS.get(member)
+    member_channel_id = ARCHIVE_MEMBER_CHANNELS.get(
+        member
+    )
 
     if member_channel:
 
