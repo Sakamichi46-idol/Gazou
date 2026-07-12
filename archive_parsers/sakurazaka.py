@@ -1,320 +1,568 @@
-import re
 import asyncio
+from datetime import datetime
+from urllib.parse import (
+    parse_qs,
+    urljoin,
+    urlsplit,
+    urlunsplit,
+)
+
 import aiohttp
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs
+
+from archive_parsers.utils import normalize_datetime
+
+
+BASE_URL = "https://sakurazaka46.com"
+
+BLOG_LIST_URL = (
+    "https://sakurazaka46.com/"
+    "s/s46/diary/blog/list"
+)
+
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
         "Chrome/120 Safari/537.36"
-    )
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,image/avif,"
+        "image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "ja-JP,ja;q=0.9",
+    "Referer": "https://sakurazaka46.com/",
 }
 
-BASE_URL = "https://sakurazaka46.com"
-BLOG_LIST_BASE_URL = "https://sakurazaka46.com/s/s46/diary/blog/list?ima=0000&page={page}"
 
-def format_sakurazaka_date(date_text):
-    if not date_text:
-        return "不明"
-    clean_text = date_text.strip()
-    nums = re.findall(r'\d+', clean_text)
-    if len(nums) >= 5:
-        year = nums[0]
-        month = nums[1].zfill(2)
-        day = nums[2].zfill(2)
-        hour = nums[3].zfill(2)
-        minute = nums[4].zfill(2)
-        return f"{year}年{month}月{day}日 {hour}:{minute}"
-    return clean_text
+# =========================
+# URL正規化
+# =========================
 
-# 💡 session を引数で受け取る非同期関数に変更
-async def get_sakurazaka_images(session, url):
-    try:
-        # aiohttpでのタイムアウト指定（接続・読み込みの合計を10秒に制限）
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with session.get(url, headers=HEADERS, timeout=timeout) as response:
-            response.raise_for_status()
-            html = await response.text()
-            soup = BeautifulSoup(html, "html.parser")
-    except Exception as e:
-        print(f"櫻坂個別ページ取得エラー: {url} {e}")
-        return {"group": "櫻坂46", "member": "", "title": "", "date": "不明", "url": url, "images": []}
+def normalize_blog_url(url: str) -> str:
+    """
+    imaなどの変動するクエリを取り除き、
+    同じ記事を同一URLとして扱う。
+    """
 
-    blog = {
-        "group": "櫻坂46",
-        "member": "",
-        "title": "",
-        "date": "不明",
-        "url": url,
-        "images": []
-    }
+    if not url:
+        return ""
 
-    title = soup.find("h1", class_="title")
-    if not title:
-        title = soup.find("h1")
-    if title:
-        blog["title"] = title.get_text(strip=True)
-
-    blog_foot = soup.find(class_="blog-foot")
-    if blog_foot:
-        member = blog_foot.find("p", class_="name")
-        if member:
-            blog["member"] = member.get_text(strip=True)
-
-        date = blog_foot.find("p", class_="date")
-        if date:
-            raw_date = date.get_text(" ", strip=True)
-            blog["date"] = format_sakurazaka_date(raw_date)
-
-    article = (
-        soup.find(class_="box-article")
-        or soup.find(class_="bd--edit")
-        or soup.find("article")
-        or soup.find("main")
+    full_url = urljoin(
+        BASE_URL,
+        url
     )
-    if article is None:
-        article = soup
 
-    seen = set()
-    for img in article.find_all("img"):
-        src = img.get("src")
-        if not src:
-            continue
-        image_url = urljoin(url, src)
-        if "/files/" not in image_url:
-            continue
-        if image_url in seen:
-            continue
-        seen.add(image_url)
-        blog["images"].append(image_url)
+    parts = urlsplit(
+        full_url
+    )
 
-    return blog
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            "",
+            ""
+        )
+    )
 
-# 💡 非同期関数に変更
-async def get_max_page(session):
-    try:
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with session.get(BLOG_LIST_BASE_URL.format(page=0), headers=HEADERS, timeout=timeout) as response:
-            response.raise_for_status()
-            html = await response.text()
-            soup = BeautifulSoup(html, "html.parser")
-        
-        max_page = 0
-        for a in soup.select(".com-pager a[href]"):
-            href = a.get("href")
-            parsed = urlparse(href)
-            queries = parse_qs(parsed.query)
-            page_val = queries.get("page")
-            if page_val:
-                p_num = int(page_val[0])
-                if p_num > max_page:
-                    max_page = p_num
-        
-        return max_page if max_page > 0 else 381
-    except Exception as e:
-        print(f"最大ページ数取得エラー: {e}")
-        return 381
 
-# 💡 非同期関数に変更
-async def get_blog_urls(session):
-    urls = []
-    
-    # 💡 await をつけて呼び出す
-    max_page = await get_max_page(session)
-    print(f"櫻坂46ブログの最古ページ番号: {max_page} から遡り巡回を開始します。")
+# =========================
+# 日時ソート用
+# =========================
 
-    for page in range(max_page, -1, -1):
-        url = BLOG_LIST_BASE_URL.format(page=page)
+def datetime_key(blog: dict) -> datetime:
+
+    date_text = blog.get(
+        "date",
+        ""
+    )
+
+    formats = (
+        "%Y年%m月%d日 %H:%M",
+        "%Y年%m月%d日",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    )
+
+    for fmt in formats:
+
         try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with session.get(url, headers=HEADERS, timeout=timeout) as response:
-                response.raise_for_status()
-                html = await response.text()
-                soup = BeautifulSoup(html, "html.parser")
-            
-            page_urls = []
-            for a in soup.find_all("a", href=True):
-                href = a.get("href")
-                if "/diary/detail/" in href:
-                    target_url = urljoin(BASE_URL, href)
-                    if target_url not in page_urls and target_url not in urls:
-                        page_urls.append(target_url)
-            
-            page_urls.reverse()
-            urls.extend(page_urls)
-            
-            # 💡 連続リクエストでサーバーに負荷をかけないよう、非同期の sleep を入れる
-            await asyncio.sleep(0.5)
-            
-        except Exception as e:
-            print(f"櫻坂一覧ページ(page={page})取得エラー: {e}")
+
+            return datetime.strptime(
+                date_text,
+                fmt
+            )
+
+        except ValueError:
+
             continue
 
-    return urls
+    # 日付解析に失敗した記事は最後へ
+    return datetime.max
 
-async def get_blog_urls(session):
 
-    urls = []
+# =========================
+# HTML取得
+# =========================
 
-    max_page = await get_max_page(session)
+async def fetch_html(
+    session: aiohttp.ClientSession,
+    url: str,
+) -> str:
 
-    print(
-        f"櫻坂46ブログの最古ページ番号: {max_page} から遡り巡回を開始します。"
+    timeout = aiohttp.ClientTimeout(
+        total=20
     )
 
+    async with session.get(
+        url,
+        headers=HEADERS,
+        timeout=timeout
+    ) as response:
 
-    for page in range(max_page, -1, -1):
+        response.raise_for_status()
 
-        url = BLOG_LIST_BASE_URL.format(
-            page=page
+        return await response.text()
+
+
+# =========================
+# 最大ページ取得
+# =========================
+
+async def get_max_page(
+    session: aiohttp.ClientSession
+) -> int:
+
+    url = (
+        f"{BLOG_LIST_URL}"
+        "?ima=0000&page=0"
+    )
+
+    try:
+
+        html = await fetch_html(
+            session,
+            url
         )
 
+    except Exception as e:
+
+        print(
+            "櫻坂 最大ページ取得エラー:",
+            e
+        )
+
+        # 取得できなかった場合の暫定値
+        return 381
+
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+    max_page = 0
+
+
+    # 一般的なページャー
+    pager_links = soup.select(
+        ".com-pager a[href], "
+        ".c-pager a[href], "
+        "a[href*='page=']"
+    )
+
+
+    for anchor in pager_links:
+
+        href = anchor.get(
+            "href",
+            ""
+        )
+
+        if not href:
+            continue
+
+
+        query = parse_qs(
+            urlsplit(href).query
+        )
+
+        page_values = query.get(
+            "page"
+        )
+
+        if not page_values:
+            continue
+
+
         try:
 
-            timeout = aiohttp.ClientTimeout(
-                total=10
+            page_number = int(
+                page_values[0]
             )
 
-
-            async with session.get(
-                url,
-                headers=HEADERS,
-                timeout=timeout
-            ) as response:
-
-                response.raise_for_status()
-
-                html = await response.text()
-
-
-            soup = BeautifulSoup(
-                html,
-                "html.parser"
-            )
-
-
-            page_urls = []
-
-
-            for a in soup.find_all(
-                "a",
-                href=True
-            ):
-
-                href = a.get(
-                    "href"
-                )
-
-
-                if "/diary/detail/" in href:
-
-                    target_url = urljoin(
-                        BASE_URL,
-                        href
-                    )
-
-
-                    if (
-                        target_url not in page_urls
-                        and target_url not in urls
-                    ):
-
-                        page_urls.append(
-                            target_url
-                        )
-
-
-            page_urls.reverse()
-
-            urls.extend(
-                page_urls
-            )
-
-
-            print(
-                f"櫻坂 page={page}: {len(page_urls)}件 / 合計{len(urls)}件"
-            )
-
-
-            await asyncio.sleep(
-                0.5
-            )
-
-
-        except Exception as e:
-
-            print(
-                f"櫻坂一覧ページ(page={page})取得エラー: {e}"
-            )
+        except (TypeError, ValueError):
 
             continue
 
 
+        max_page = max(
+            max_page,
+            page_number
+        )
+
+
+    if max_page <= 0:
+
+        print(
+            "⚠️ 櫻坂 最大ページをHTMLから取得できませんでした。"
+            " 暫定値381を使用します。"
+        )
+
+        return 381
+
+
     print(
-        f"櫻坂URL総取得: {len(urls)}"
+        f"櫻坂 最大ページ: {max_page}"
+    )
+
+    return max_page
+
+
+# =========================
+# 記事カード解析
+# =========================
+
+def parse_blog_card(
+    card
+) -> dict | None:
+
+    link_tag = card.select_one(
+        "a[href*='/diary/detail/']"
     )
 
 
-    return urls
+    if not link_tag:
+
+        # card自体がaタグの場合にも対応
+        if (
+            getattr(card, "name", None) == "a"
+            and "/diary/detail/" in card.get("href", "")
+        ):
+
+            link_tag = card
+
+        else:
+
+            return None
 
 
+    href = link_tag.get(
+        "href",
+        ""
+    )
+
+    blog_url = normalize_blog_url(
+        href
+    )
+
+
+    if not blog_url:
+
+        return None
+
+
+    title_tag = (
+        card.select_one(".title")
+        or card.select_one("h3")
+        or card.select_one("h2")
+    )
+
+
+    member_tag = (
+        card.select_one(".name")
+        or card.select_one(".blog-name")
+    )
+
+
+    date_tag = (
+        card.select_one(".date.wf-a")
+        or card.select_one(".date")
+        or card.select_one("time")
+    )
+
+
+    title = (
+        title_tag.get_text(
+            " ",
+            strip=True
+        )
+        if title_tag
+        else ""
+    )
+
+
+    member = (
+        member_tag.get_text(
+            " ",
+            strip=True
+        )
+        if member_tag
+        else ""
+    )
+
+
+    raw_date = (
+        date_tag.get_text(
+            " ",
+            strip=True
+        )
+        if date_tag
+        else ""
+    )
+
+
+    date = normalize_datetime(
+        raw_date
+    )
+
+
+    return {
+        "group": "櫻坂46",
+        "url": blog_url,
+        "member": member,
+        "title": title,
+        "date": date,
+        "text": ""
+    }
+
+
+# =========================
+# 1ページ取得
+# =========================
+
+async def get_page_blogs(
+    session: aiohttp.ClientSession,
+    page: int,
+) -> list[dict]:
+
+    url = (
+        f"{BLOG_LIST_URL}"
+        f"?ima=0000&page={page}"
+    )
+
+
+    try:
+
+        html = await fetch_html(
+            session,
+            url
+        )
+
+    except Exception as e:
+
+        print(
+            f"櫻坂 page={page} 取得エラー:",
+            e
+        )
+
+        return []
+
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+
+    # 現行HTMLを優先
+    cards = soup.select(
+        "ul.com-blog-part li.box"
+    )
+
+
+    # サイト変更時のフォールバック
+    if not cards:
+
+        cards = soup.select(
+            "li.box"
+        )
+
+
+    # さらにフォールバック
+    if not cards:
+
+        cards = soup.select(
+            "a[href*='/diary/detail/']"
+        )
+
+
+    page_blogs = []
+
+    seen_urls = set()
+
+
+    for card in cards:
+
+        blog = parse_blog_card(
+            card
+        )
+
+        if not blog:
+            continue
+
+
+        blog_url = blog["url"]
+
+
+        if blog_url in seen_urls:
+            continue
+
+
+        seen_urls.add(
+            blog_url
+        )
+
+        page_blogs.append(
+            blog
+        )
+
+
+    # 一覧は新しい順で表示されるため、
+    # 古い記事から処理できるようページ内を反転
+    page_blogs.reverse()
+
+
+    print(
+        f"櫻坂 page={page}: "
+        f"{len(page_blogs)}件"
+    )
+
+
+    return page_blogs
+
+
+# =========================
+# 全記事取得
+# =========================
+
+async def get_all_blogs(
+    session: aiohttp.ClientSession
+) -> list[dict]:
+
+    max_page = await get_max_page(
+        session
+    )
+
+
+    print(
+        f"櫻坂 page={max_page} から"
+        "古い順に巡回します。"
+    )
+
+
+    blogs = []
+
+    seen_urls = set()
+
+
+    # 最大ページが最古側なので、
+    # max_page → 0 の順で巡回
+    for page in range(
+        max_page,
+        -1,
+        -1
+    ):
+
+        page_blogs = await get_page_blogs(
+            session,
+            page
+        )
+
+
+        for blog in page_blogs:
+
+            blog_url = blog.get(
+                "url",
+                ""
+            )
+
+
+            if not blog_url:
+                continue
+
+
+            if blog_url in seen_urls:
+                continue
+
+
+            seen_urls.add(
+                blog_url
+            )
+
+            blogs.append(
+                blog
+            )
+
+
+        print(
+            f"櫻坂 進捗 page={page} / "
+            f"合計{len(blogs)}件"
+        )
+
+
+        # サイトへ負荷をかけすぎない
+        await asyncio.sleep(
+            0.5
+        )
+
+
+    print(
+        f"櫻坂 重複除去後: {len(blogs)}件"
+    )
+
+
+    return blogs
 
 
 # =========================
 # archive_checker用
 # =========================
 
-async def get_oldest_first(session):
+async def get_oldest_first(
+    session: aiohttp.ClientSession
+) -> list[dict]:
 
-    blogs = []
-
-    urls = await get_blog_urls(
+    blogs = await get_all_blogs(
         session
     )
 
-    print(
-        f"櫻坂取得URL数: {len(urls)}"
+
+    # 念のため日時で再ソート
+    blogs.sort(
+        key=datetime_key
     )
 
 
-    for index, url in enumerate(urls, 1):
+    if blogs:
 
         print(
-            f"櫻坂記事取得 {index}/{len(urls)}"
+            "櫻坂 最古:",
+            blogs[0].get("date", ""),
+            blogs[0].get("url", "")
         )
 
-
-        blog_data = await get_sakurazaka_images(
-            session,
-            url
+        print(
+            "櫻坂 最新:",
+            blogs[-1].get("date", ""),
+            blogs[-1].get("url", "")
         )
-
-
-        blogs.append(
-            {
-                "group": "櫻坂46",
-                "url": blog_data["url"],
-                "member": blog_data["member"],
-                "title": blog_data["title"],
-                "date": blog_data["date"]
-            }
-        )
-
-
-        await asyncio.sleep(
-            0.5
-        )
-
-
-    blogs.sort(
-        key=lambda x:
-            x.get(
-                "date",
-                ""
-            )
-    )
 
 
     return blogs
