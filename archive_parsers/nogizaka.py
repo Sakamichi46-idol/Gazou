@@ -1,8 +1,10 @@
+import json
 import re
-import aiohttp
+import traceback
 
-from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+
+import aiohttp
 
 
 HEADERS = {
@@ -12,108 +14,21 @@ HEADERS = {
         "AppleWebKit/537.36 "
         "(KHTML, like Gecko) "
         "Chrome/120 Safari/537.36"
-    )
+    ),
+    "Accept-Language": "ja-JP,ja;q=0.9",
 }
 
 
-BASE_URL = "https://www.nogizaka46.com"
 
-
-# =========================
-# メンバー辞書
-# =========================
-
-MEMBER_NAMES = [
-
-    "五百城茉央",
-    "池田瑛紗",
-    "一ノ瀬美空",
-    "伊藤理々杏",
-    "井上和",
-    "岩本蓮加",
-    "遠藤さくら",
-    "大越ひなの",
-    "岡本姫奈",
-    "小川彩",
-    "奥田いろは",
-    "賀喜遥香",
-    "金川紗耶",
-    "川﨑桜",
-    "黒見明香",
-    "柴田柚菜",
-    "菅原咲月",
-    "鈴木佑捺",
-    "瀬戸口心月",
-    "田村真佑",
-    "筒井あやめ",
-    "冨里奈央",
-    "長嶋凛桜",
-    "中西アルノ",
-    "林瑠奈",
-    "増田三莉音",
-    "森平麗心",
-    "矢田萌華",
-    "弓木奈於",
-    "吉田綾乃クリスティー"
-
-]
-
-
-# =========================
-# 名前正規化
-# =========================
-
-def normalize_name(text):
-
-    if not text:
-        return ""
-
-    return re.sub(
-        r"\s+",
-        "",
-        text
-    )
-
-
-# =========================
-# メンバー判定
-# =========================
-
-def detect_member(
-    member_name,
-    title
-):
-
-    if "運営スタッフ" in member_name:
-        return None
-
-
-    title = normalize_name(title)
-
-
-    for name in MEMBER_NAMES:
-
-        if name in title:
-            return name
-
-
-    member_name = normalize_name(
-        member_name
-    )
-
-
-    for name in MEMBER_NAMES:
-
-        if name in member_name:
-            return name
-
-
-    return None
+API_URL = (
+    "https://www.nogizaka46.com"
+    "/s/n46/api/list/blog"
+)
 
 
 
 # =========================
-# ブログ取得
+# 全記事取得
 # =========================
 
 async def get_all_blog_urls(
@@ -125,13 +40,13 @@ async def get_all_blog_urls(
 
     for page in range(
         1,
-        143
+        200
     ):
 
         url = (
-            "https://www.nogizaka46.com/"
-            "s/n46/diary/MEMBER"
-            f"?ima=1123&page={page}"
+            API_URL
+            +
+            f"?page={page}"
         )
 
 
@@ -141,148 +56,72 @@ async def get_all_blog_urls(
                 url,
                 headers=HEADERS,
                 timeout=20
-
             ) as response:
 
-                html = await response.text()
+                text = await response.text()
+
 
 
         except Exception as e:
 
             print(
-                f"乃木坂取得エラー page={page}: {e}"
+                "乃木坂API取得エラー:",
+                e
             )
 
             continue
 
 
 
-        # =====================
-        # HTML確認
-        # =====================
+        match = re.search(
+            r"res\((.*)\)",
+            text
+        )
 
-        print(
-            "取得HTML m--postone数:",
-            html.count(
-                "m--postone__a"
+
+        if not match:
+
+            print(
+                f"乃木坂 page={page} API解析失敗"
             )
-        )
+
+            break
 
 
 
-        soup = BeautifulSoup(
-            html,
-            "html.parser"
-        )
+        try:
+
+            data = json.loads(
+                match.group(1)
+            )
 
 
-        blog_area = soup.select_one(
-            ".ba--all"
-        )
+        except Exception:
 
-
-        print(
-            f"乃木坂HTML blog確認: {blog_area is not None}"
-        )
+            traceback.print_exc()
+            break
 
 
 
-        # =====================
-        # 記事取得
-        # =====================
-
-        posts = soup.select(
-            "a[href*='/diary/detail/']"
+        items = data.get(
+            "data",
+            []
         )
 
 
         print(
-            f"乃木坂 page={page} 記事数: {len(posts)}"
+            f"乃木坂 page={page}: {len(items)}件"
         )
 
 
 
-        for post in posts:
+        if not items:
 
-
-            href = post.get(
-                "href"
-            )
-
-
-            if not href:
-                continue
+            break
 
 
 
-            blog_url = urljoin(
-                BASE_URL,
-                href
-            )
-
-
-
-            title_tag = post.select_one(
-                ".m--postone__ttl"
-            )
-
-
-            date_tag = post.select_one(
-                ".m--postone__time"
-            )
-
-
-            member_tag = post.select_one(
-                ".m--postone__name"
-            )
-
-
-
-            title = (
-                title_tag.get_text(
-                    strip=True
-                )
-                if title_tag
-                else ""
-            )
-
-
-
-            date = (
-                date_tag.get_text(
-                    strip=True
-                )
-                if date_tag
-                else ""
-            )
-
-
-
-            member = (
-                member_tag.get_text(
-                    strip=True
-                )
-                if member_tag
-                else ""
-            )
-
-
-
-            detected_member = detect_member(
-                member,
-                title
-            )
-
-
-
-            if not detected_member:
-
-                detected_member = (
-                    normalize_name(member)
-                    or
-                    "不明"
-                )
-
+        for blog in items:
 
 
             blogs.append(
@@ -292,16 +131,34 @@ async def get_all_blog_urls(
                         "乃木坂46",
 
                     "url":
-                        blog_url,
+                        blog.get(
+                            "link",
+                            ""
+                        ),
 
                     "member":
-                        detected_member,
+                        blog.get(
+                            "name",
+                            ""
+                        ),
 
                     "title":
-                        title,
+                        blog.get(
+                            "title",
+                            ""
+                        ),
 
                     "date":
-                        date
+                        blog.get(
+                            "date",
+                            ""
+                        ),
+
+                    "text":
+                        blog.get(
+                            "text",
+                            ""
+                        )
 
                 }
             )
@@ -309,7 +166,8 @@ async def get_all_blog_urls(
 
 
     print(
-        f"乃木坂URL取得: {len(blogs)}"
+        "乃木坂総取得:",
+        len(blogs)
     )
 
 
