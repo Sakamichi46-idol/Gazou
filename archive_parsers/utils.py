@@ -1,8 +1,5 @@
 import re
-from archive_parsers.utils import (
-    normalize_datetime,
-    normalize_member_name,
-)
+from datetime import datetime
 
 
 # =========================
