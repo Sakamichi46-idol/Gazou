@@ -6,7 +6,13 @@ from urllib.parse import urljoin
 
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/120 Safari/537.36"
+    )
 }
 
 
@@ -69,7 +75,6 @@ def normalize_name(text):
     )
 
 
-
 # =========================
 # メンバー判定
 # =========================
@@ -83,16 +88,13 @@ def detect_member(
         return None
 
 
-    title = normalize_name(
-        title
-    )
+    title = normalize_name(title)
 
 
     for name in MEMBER_NAMES:
 
         if name in title:
             return name
-
 
 
     member_name = normalize_name(
@@ -102,9 +104,8 @@ def detect_member(
 
     for name in MEMBER_NAMES:
 
-        if name == member_name:
+        if name in member_name:
             return name
-
 
 
     return None
@@ -130,7 +131,7 @@ async def get_all_blog_urls(
         url = (
             "https://www.nogizaka46.com/"
             "s/n46/diary/MEMBER"
-            f"?ima=2155&page={page}"
+            f"?ima=1123&page={page}"
         )
 
 
@@ -139,7 +140,8 @@ async def get_all_blog_urls(
             async with session.get(
                 url,
                 headers=HEADERS,
-                timeout=15
+                timeout=20
+
             ) as response:
 
                 html = await response.text()
@@ -155,24 +157,42 @@ async def get_all_blog_urls(
 
 
 
+        # =====================
+        # HTML確認
+        # =====================
+
+        print(
+            "取得HTML m--postone数:",
+            html.count(
+                "m--postone__a"
+            )
+        )
+
+
+
         soup = BeautifulSoup(
             html,
             "html.parser"
         )
 
 
-        # デバッグ確認
         blog_area = soup.select_one(
             ".ba--all"
         )
+
 
         print(
             f"乃木坂HTML blog確認: {blog_area is not None}"
         )
 
 
+
+        # =====================
+        # 記事取得
+        # =====================
+
         posts = soup.select(
-            "a.m--postone__a"
+            "a[href*='/diary/detail/']"
         )
 
 
@@ -195,30 +215,37 @@ async def get_all_blog_urls(
 
 
 
+            blog_url = urljoin(
+                BASE_URL,
+                href
+            )
+
+
+
             title_tag = post.select_one(
-                "p.m--postone__ttl"
+                ".m--postone__ttl"
             )
 
 
             date_tag = post.select_one(
-                "p.m--postone__time"
+                ".m--postone__time"
             )
 
 
             member_tag = post.select_one(
-                "p.m--postone__name"
+                ".m--postone__name"
             )
 
 
 
-            if not title_tag:
-                continue
-
-
-
-            title = title_tag.get_text(
-                strip=True
+            title = (
+                title_tag.get_text(
+                    strip=True
+                )
+                if title_tag
+                else ""
             )
+
 
 
             date = (
@@ -228,6 +255,7 @@ async def get_all_blog_urls(
                 if date_tag
                 else ""
             )
+
 
 
             member = (
@@ -240,22 +268,20 @@ async def get_all_blog_urls(
 
 
 
-            blog_url = urljoin(
-                BASE_URL,
-                href
-            )
-
-
-
             detected_member = detect_member(
                 member,
                 title
             )
 
 
+
             if not detected_member:
 
-                detected_member = "不明"
+                detected_member = (
+                    normalize_name(member)
+                    or
+                    "不明"
+                )
 
 
 
