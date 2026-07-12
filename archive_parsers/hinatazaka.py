@@ -10,7 +10,10 @@ from urllib.parse import (
 import aiohttp
 from bs4 import BeautifulSoup
 
-from archive_parsers.utils import normalize_datetime
+from archive_parsers.utils import (
+    normalize_datetime,
+    normalize_member_name,
+)
 
 
 # =========================
