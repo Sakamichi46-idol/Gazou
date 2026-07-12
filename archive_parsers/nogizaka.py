@@ -1,17 +1,28 @@
+import asyncio
 import json
 import re
+
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
+from bs4 import BeautifulSoup
 
-from archive_parsers.utils import normalize_datetime
+from archive_parsers.utils import (
+    normalize_datetime,
+    normalize_member_name,
+)
 
+
+# =========================
+# 基本設定
+# =========================
 
 API_URL = (
     "https://www.nogizaka46.com"
     "/s/n46/api/list/blog"
 )
+
 
 HEADERS = {
     "User-Agent": (
@@ -30,26 +41,36 @@ HEADERS = {
 }
 
 
+# 詳細ページの同時取得数
+DETAIL_CONCURRENCY = 5
+
+# 詳細ページ取得後の待機時間
+DETAIL_DELAY = 0.2
+
+
 # =========================
 # URL正規化
 # =========================
 
-def normalize_blog_url(url: str) -> str:
+def normalize_blog_url(
+    url: str
+) -> str:
     """
-    imaの値が違うだけの同一記事を、
-    同じURLとして扱える形へ変換する。
+    imaなど、記事内容と関係のない
+    クエリ文字列を削除する。
 
     例:
-    detail/104608?ima=5638
-    detail/104608?ima=5639
+    detail/104610?ima=5638
         ↓
-    detail/104608
+    detail/104610
     """
 
     if not url:
         return ""
 
-    parts = urlsplit(url)
+    parts = urlsplit(
+        url
+    )
 
     return urlunsplit(
         (
@@ -66,21 +87,27 @@ def normalize_blog_url(url: str) -> str:
 # APIレスポンス解析
 # =========================
 
-def parse_api_response(text: str) -> dict | None:
+def parse_api_response(
+    text: str
+) -> dict | None:
 
     if not text:
         return None
 
-    # JSONP形式: res({...})
+
+    # JSONP形式
+    # res({...})
     match = re.search(
         r"^\s*res\((.*)\)\s*;?\s*$",
         text,
         flags=re.DOTALL
     )
 
+
     if match:
 
         try:
+
             return json.loads(
                 match.group(1)
             )
@@ -94,9 +121,13 @@ def parse_api_response(text: str) -> dict | None:
 
             return None
 
-    # 通常JSON形式にも対応
+
+    # 通常のJSON形式にも対応
     try:
-        return json.loads(text)
+
+        return json.loads(
+            text
+        )
 
     except json.JSONDecodeError:
 
@@ -109,17 +140,18 @@ def parse_api_response(text: str) -> dict | None:
 
 
 # =========================
-# 1回分取得
+# API取得
 # =========================
 
 async def fetch_api_items(
-    session,
+    session: aiohttp.ClientSession,
     params=None
 ):
 
     timeout = aiohttp.ClientTimeout(
         total=20
     )
+
 
     async with session.get(
         API_URL,
@@ -133,9 +165,13 @@ async def fetch_api_items(
         text = await response.text()
 
 
-    data = parse_api_response(text)
+    data = parse_api_response(
+        text
+    )
+
 
     if not data:
+
         return [], {}
 
 
@@ -144,7 +180,12 @@ async def fetch_api_items(
         []
     )
 
-    if not isinstance(items, list):
+
+    if not isinstance(
+        items,
+        list
+    ):
+
         items = []
 
 
@@ -155,19 +196,32 @@ async def fetch_api_items(
 # API記事を共通形式へ変換
 # =========================
 
-def convert_item(item: dict) -> dict | None:
+def convert_item(
+    item: dict
+) -> dict | None:
 
     raw_url = item.get(
         "link",
         ""
     )
 
-    url = normalize_blog_url(
+
+    blog_url = normalize_blog_url(
         raw_url
     )
 
-    if not url:
+
+    if not blog_url:
+
         return None
+
+
+    member = normalize_member_name(
+        item.get(
+            "name",
+            ""
+        )
+    )
 
 
     date = normalize_datetime(
@@ -179,24 +233,346 @@ def convert_item(item: dict) -> dict | None:
 
 
     return {
-        "group": "乃木坂46",
-        "url": url,
-        "member": item.get("name", "") or "",
-        "title": item.get("title", "") or "",
-        "date": date,
-        "text": item.get("text", "") or ""
+
+        "group":
+            "乃木坂46",
+
+        "url":
+            blog_url,
+
+        "member":
+            member,
+
+        "title":
+            item.get(
+                "title",
+                ""
+            ) or "",
+
+        "date":
+            date,
+
+        "text":
+            item.get(
+                "text",
+                ""
+            ) or ""
+
     }
 
 
 # =========================
-# APIページング確認
+# 詳細ページHTML取得
 # =========================
 
-async def test_pagination(session):
+async def fetch_detail_html(
+    session: aiohttp.ClientSession,
+    url: str
+) -> str:
+
+    timeout = aiohttp.ClientTimeout(
+        total=20
+    )
+
+
+    request_headers = dict(
+        HEADERS
+    )
+
+    request_headers["Accept"] = (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    )
+
+
+    async with session.get(
+        url,
+        headers=request_headers,
+        timeout=timeout,
+        allow_redirects=True
+    ) as response:
+
+        response.raise_for_status()
+
+        return await response.text(
+            errors="replace"
+        )
+
+
+# =========================
+# 詳細ページから情報取得
+# =========================
+
+async def enrich_blog_detail(
+    session: aiohttp.ClientSession,
+    semaphore: asyncio.Semaphore,
+    blog: dict,
+    index: int,
+    total: int
+) -> dict:
+    """
+    詳細ページから、
+
+    ・時刻を含む投稿日
+    ・メンバー名
+    ・タイトル
+
+    を補完する。
+    """
+
+    url = blog.get(
+        "url",
+        ""
+    )
+
+
+    if not url:
+
+        return blog
+
+
+    async with semaphore:
+
+        try:
+
+            html = await fetch_detail_html(
+                session,
+                url
+            )
+
+
+            soup = BeautifulSoup(
+                html,
+                "html.parser"
+            )
+
+
+            # -------------------------
+            # 投稿日時
+            # -------------------------
+
+            date_tag = (
+                soup.select_one(
+                    ".bd--hd__date"
+                )
+                or soup.select_one(
+                    ".bd--date"
+                )
+                or soup.select_one(
+                    "time"
+                )
+            )
+
+
+            if date_tag:
+
+                raw_date = date_tag.get_text(
+                    " ",
+                    strip=True
+                )
+
+
+                detail_date = normalize_datetime(
+                    raw_date
+                )
+
+
+                if detail_date:
+
+                    blog["date"] = detail_date
+
+
+            # -------------------------
+            # メンバー
+            # -------------------------
+
+            member_tag = (
+                soup.select_one(
+                    ".bd--prof__name"
+                )
+                or soup.select_one(
+                    ".bd--name"
+                )
+            )
+
+
+            if member_tag:
+
+                member = normalize_member_name(
+                    member_tag.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+
+                if member:
+
+                    blog["member"] = member
+
+
+            # -------------------------
+            # タイトル
+            # -------------------------
+
+            title_tag = (
+                soup.select_one(
+                    ".bd--hd__ttl"
+                )
+                or soup.select_one(
+                    "h1"
+                )
+            )
+
+
+            if title_tag:
+
+                title = title_tag.get_text(
+                    " ",
+                    strip=True
+                )
+
+
+                if title:
+
+                    blog["title"] = title
+
+
+            print(
+                f"乃木坂 詳細取得 "
+                f"{index}/{total}: "
+                f"{blog.get('date', '不明')} / "
+                f"{blog.get('member', '不明')} / "
+                f"{url}"
+            )
+
+
+        except Exception as e:
+
+            print(
+                "乃木坂詳細ページ取得エラー:",
+                url,
+                e
+            )
+
+
+        await asyncio.sleep(
+            DETAIL_DELAY
+        )
+
+
+    return blog
+
+
+# =========================
+# 全記事の詳細情報補完
+# =========================
+
+async def enrich_all_details(
+    session: aiohttp.ClientSession,
+    blogs: list[dict]
+) -> list[dict]:
+
+    if not blogs:
+
+        return []
+
+
+    print(
+        f"乃木坂 詳細日時取得開始: "
+        f"{len(blogs)}件"
+    )
+
+
+    semaphore = asyncio.Semaphore(
+        DETAIL_CONCURRENCY
+    )
+
+
+    tasks = []
+
+
+    for index, blog in enumerate(
+        blogs,
+        start=1
+    ):
+
+        tasks.append(
+
+            enrich_blog_detail(
+
+                session,
+
+                semaphore,
+
+                blog,
+
+                index,
+
+                len(blogs)
+
+            )
+
+        )
+
+
+    results = await asyncio.gather(
+        *tasks,
+        return_exceptions=True
+    )
+
+
+    enriched_blogs = []
+
+
+    for original_blog, result in zip(
+        blogs,
+        results
+    ):
+
+        if isinstance(
+            result,
+            Exception
+        ):
+
+            print(
+                "乃木坂詳細補完タスクエラー:",
+                result
+            )
+
+            enriched_blogs.append(
+                original_blog
+            )
+
+        else:
+
+            enriched_blogs.append(
+                result
+            )
+
+
+    print(
+        f"乃木坂 詳細日時取得完了: "
+        f"{len(enriched_blogs)}件"
+    )
+
+
+    return enriched_blogs
+
+
+# =========================
+# ページング確認
+# =========================
+
+async def test_pagination(
+    session: aiohttp.ClientSession
+):
 
     first_items, first_data = await fetch_api_items(
         session
     )
+
 
     second_items, second_data = await fetch_api_items(
         session,
@@ -207,39 +583,50 @@ async def test_pagination(session):
 
 
     first_urls = [
+
         normalize_blog_url(
-            item.get("link", "")
+            item.get(
+                "link",
+                ""
+            )
         )
+
         for item in first_items
-    ]
 
-    second_urls = [
-        normalize_blog_url(
-            item.get("link", "")
+        if item.get(
+            "link"
         )
-        for item in second_items
+
     ]
 
-
-    first_urls = [
-        url
-        for url in first_urls
-        if url
-    ]
 
     second_urls = [
-        url
-        for url in second_urls
-        if url
+
+        normalize_blog_url(
+            item.get(
+                "link",
+                ""
+            )
+        )
+
+        for item in second_items
+
+        if item.get(
+            "link"
+        )
+
     ]
 
 
     print(
-        f"乃木坂 API1回目: {len(first_urls)}件"
+        f"乃木坂 API1回目: "
+        f"{len(first_urls)}件"
     )
 
+
     print(
-        f"乃木坂 page=2指定: {len(second_urls)}件"
+        f"乃木坂 page=2指定: "
+        f"{len(second_urls)}件"
     )
 
 
@@ -270,15 +657,15 @@ async def test_pagination(session):
 
 
     same_result = (
-        first_urls == second_urls
-        and bool(first_urls)
+        bool(first_urls)
+        and first_urls == second_urls
     )
 
 
     if same_result:
 
         print(
-            "⚠️ 乃木坂APIは page=2 を無視して、"
+            "⚠️ 乃木坂APIはpage指定を無視して、"
             "同じ一覧を返しています。"
         )
 
@@ -289,12 +676,16 @@ async def test_pagination(session):
         )
 
 
-    # APIが返すメタ情報を確認
     metadata_keys = [
+
         key
+
         for key in first_data.keys()
+
         if key != "data"
+
     ]
+
 
     print(
         "乃木坂APIメタ情報キー:",
@@ -304,15 +695,25 @@ async def test_pagination(session):
 
     for key in metadata_keys:
 
-        value = first_data.get(key)
+        value = first_data.get(
+            key
+        )
+
 
         if isinstance(
             value,
-            (str, int, float, bool, type(None))
+            (
+                str,
+                int,
+                float,
+                bool,
+                type(None)
+            )
         ):
 
             print(
-                f"乃木坂API {key}: {value}"
+                f"乃木坂API {key}: "
+                f"{value}"
             )
 
 
@@ -324,19 +725,25 @@ async def test_pagination(session):
 
 
 # =========================
-# ブログ取得
+# ブログ一覧取得
 # =========================
 
-async def get_all_blog_urls(session):
+async def get_all_blog_urls(
+    session: aiohttp.ClientSession
+) -> list[dict]:
 
-    first_items, second_items, same_result = (
-        await test_pagination(session)
+    (
+        first_items,
+        second_items,
+        same_result
+
+    ) = await test_pagination(
+        session
     )
 
 
-    # page指定が無視される状態で
-    # 199回取得すると同じ100件が重複するため、
-    # テスト中は最初のレスポンスだけ使う
+    # page=2が同一内容の場合、
+    # 重複取得を避けて最初の100件だけ使う
     if same_result:
 
         source_items = first_items
@@ -361,20 +768,32 @@ async def get_all_blog_urls(session):
             item
         )
 
+
         if not blog:
+
             continue
 
 
-        url = blog["url"]
+        blog_url = blog.get(
+            "url",
+            ""
+        )
 
 
-        if url in seen_urls:
+        if not blog_url:
+
+            continue
+
+
+        if blog_url in seen_urls:
+
             continue
 
 
         seen_urls.add(
-            url
+            blog_url
         )
+
 
         blogs.append(
             blog
@@ -382,7 +801,15 @@ async def get_all_blog_urls(session):
 
 
     print(
-        f"乃木坂 重複除去後: {len(blogs)}件"
+        f"乃木坂 重複除去後: "
+        f"{len(blogs)}件"
+    )
+
+
+    # 詳細ページを開いて時刻を取得
+    blogs = await enrich_all_details(
+        session,
+        blogs
     )
 
 
@@ -390,34 +817,43 @@ async def get_all_blog_urls(session):
 
 
 # =========================
-# 日時ソート用
+# 日時ソート
 # =========================
 
-def datetime_key(blog):
+def datetime_key(
+    blog: dict
+) -> datetime:
 
     date_text = blog.get(
         "date",
         ""
     )
 
+
     formats = (
+
         "%Y年%m月%d日 %H:%M",
+
         "%Y年%m月%d日",
+
         "%Y-%m-%d %H:%M",
+
         "%Y-%m-%d",
+
     )
 
 
-    for fmt in formats:
+    for date_format in formats:
 
         try:
 
             return datetime.strptime(
                 date_text,
-                fmt
+                date_format
             )
 
         except ValueError:
+
             continue
 
 
@@ -428,7 +864,9 @@ def datetime_key(blog):
 # archive_checker用
 # =========================
 
-async def get_oldest_first(session):
+async def get_oldest_first(
+    session: aiohttp.ClientSession
+) -> list[dict]:
 
     blogs = await get_all_blog_urls(
         session
@@ -444,14 +882,27 @@ async def get_oldest_first(session):
 
         print(
             "乃木坂 最古:",
-            blogs[0]["date"],
-            blogs[0]["url"]
+            blogs[0].get(
+                "date",
+                ""
+            ),
+            blogs[0].get(
+                "url",
+                ""
+            )
         )
+
 
         print(
             "乃木坂 最新:",
-            blogs[-1]["date"],
-            blogs[-1]["url"]
+            blogs[-1].get(
+                "date",
+                ""
+            ),
+            blogs[-1].get(
+                "url",
+                ""
+            )
         )
 
 
