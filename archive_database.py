@@ -11,9 +11,17 @@ DB_PATH = os.path.join(DB_DIR, DB_NAME)
 print(f"ARCHIVE DB PATH: {DB_PATH}")
 
 
+# =========================
+# DB接続
+# =========================
+
 def get_connection():
     return sqlite3.connect(DB_PATH)
 
+
+# =========================
+# 初期化
+# =========================
 
 def init_archive_db():
 
@@ -26,13 +34,18 @@ def init_archive_db():
             group_name TEXT,
             member TEXT,
             title TEXT,
-            date TEXT
+            date TEXT,
+            archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     conn.commit()
     conn.close()
 
+
+# =========================
+# 保存済み確認
+# =========================
 
 def is_archived(url):
 
@@ -51,12 +64,17 @@ def is_archived(url):
     return result is not None
 
 
-def save_archive(group_name, member, title, date, url):
+# =========================
+# 保存
+# =========================
+
+def save_archive(blog):
 
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
+        """
         INSERT OR IGNORE INTO archive
         (
             url,
@@ -67,18 +85,48 @@ def save_archive(group_name, member, title, date, url):
         )
         VALUES
         (?, ?, ?, ?, ?)
-    """,
-    (
-        url,
-        group_name,
-        member,
-        title,
-        date
-    ))
+        """,
+        (
+            blog["url"],
+            blog["group"],
+            blog["member"],
+            blog["title"],
+            blog["date"]
+        )
+    )
 
     conn.commit()
     conn.close()
 
+
+# =========================
+# 未保存だけ返す
+# =========================
+
+def filter_not_archived(blogs):
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT url FROM archive")
+
+    archived = {
+        row[0]
+        for row in cur.fetchall()
+    }
+
+    conn.close()
+
+    return [
+        blog
+        for blog in blogs
+        if blog["url"] not in archived
+    ]
+
+
+# =========================
+# 件数
+# =========================
 
 def archive_count():
 
@@ -96,14 +144,18 @@ def archive_count():
     return count
 
 
-def get_oldest_not_archived(blogs):
-    """
-    まだ保存されていない一番古いブログを返す
-    """
+# =========================
+# 全削除
+# =========================
 
-    for blog in blogs:
+def reset_archive():
 
-        if not is_archived(blog["url"]):
-            return blog
+    conn = get_connection()
+    cur = conn.cursor()
 
-    return None
+    cur.execute(
+        "DELETE FROM archive"
+    )
+
+    conn.commit()
+    conn.close()
