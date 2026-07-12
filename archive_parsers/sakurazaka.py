@@ -258,3 +258,63 @@ async def get_blog_urls(session):
 
 
     return urls
+
+
+
+
+# =========================
+# archive_checker用
+# =========================
+
+async def get_oldest_first(session):
+
+    blogs = []
+
+    urls = await get_blog_urls(
+        session
+    )
+
+    print(
+        f"櫻坂取得URL数: {len(urls)}"
+    )
+
+
+    for index, url in enumerate(urls, 1):
+
+        print(
+            f"櫻坂記事取得 {index}/{len(urls)}"
+        )
+
+
+        blog_data = await get_sakurazaka_images(
+            session,
+            url
+        )
+
+
+        blogs.append(
+            {
+                "group": "櫻坂46",
+                "url": blog_data["url"],
+                "member": blog_data["member"],
+                "title": blog_data["title"],
+                "date": blog_data["date"]
+            }
+        )
+
+
+        await asyncio.sleep(
+            0.5
+        )
+
+
+    blogs.sort(
+        key=lambda x:
+            x.get(
+                "date",
+                ""
+            )
+    )
+
+
+    return blogs
