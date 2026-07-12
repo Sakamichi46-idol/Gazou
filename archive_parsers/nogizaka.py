@@ -131,7 +131,7 @@ async def get_all_blog_urls(
         url = (
             "https://www.nogizaka46.com/"
             "s/n46/diary/MEMBER"
-            f"?page={page}"
+            f"?page={page}&ima=2155"
         )
 
 
@@ -161,6 +161,10 @@ async def get_all_blog_urls(
         soup = BeautifulSoup(
             html,
             "html.parser"
+        )
+        print(
+            "乃木坂HTML blog確認:",
+            "bl--card" in html
         )
 
 
