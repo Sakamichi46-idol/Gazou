@@ -1,60 +1,100 @@
+import asyncio
 import traceback
+from datetime import datetime
+
 import aiohttp
+
+from archive_database import filter_not_archived
 
 from archive_parsers.nogizaka import (
     get_oldest_first as get_nogizaka
 )
 
-# =========================
-# パーサー一覧
-# =========================
+from archive_parsers.sakurazaka import (
+    get_oldest_first as get_sakurazaka
+)
+
+from archive_parsers.hinatazaka import (
+    get_oldest_first as get_hinatazaka
+)
+
 
 PARSERS = {
 
-    "乃木坂46":
-        get_nogizaka
+    "乃木坂46": get_nogizaka,
+
+    "櫻坂46": get_sakurazaka,
+
+    "日向坂46": get_hinatazaka
 
 }
 
+
 # =========================
-# 全ブログ取得
+# 日付変換
+# =========================
+
+def parse_datetime(date_str):
+
+    try:
+
+        return datetime.strptime(
+            date_str,
+            "%Y年%m月%d日 %H:%M"
+        )
+
+    except Exception:
+
+        return datetime.min
+
+
+# =========================
+# 全取得
 # =========================
 
 async def get_all_blogs():
 
-    blogs = []
-
     async with aiohttp.ClientSession() as session:
 
-        for group, parser in PARSERS.items():
+        tasks = [
 
-            print(f"[{group}] 巡回開始")
+            parser(session)
 
-            try:
+            for parser in PARSERS.values()
 
-                result = await parser(session)
+        ]
 
-                if result:
+        results = await asyncio.gather(
 
-                    blogs.extend(result)
+            *tasks,
 
-                    print(
-                        f"[{group}] {len(result)}件取得"
-                    )
+            return_exceptions=True
 
-                else:
+        )
 
-                    print(
-                        f"[{group}] 記事なし"
-                    )
+    blogs = []
 
-            except Exception as e:
+    for group, result in zip(
 
-                print(
-                    f"{group}取得エラー: {e}"
-                )
+        PARSERS.keys(),
 
-                traceback.print_exc()
+        results
+
+    ):
+
+        if isinstance(result, Exception):
+
+            print(f"{group}取得失敗")
+
+            traceback.print_exception(result)
+
+            continue
+
+        print(f"{group}: {len(result)}件")
+
+        blogs.extend(result)
+
+    print(f"取得合計: {len(blogs)}件")
 
     return blogs
 
@@ -67,8 +107,20 @@ async def get_archive_targets():
 
     blogs = await get_all_blogs()
 
+    print("DB照合中...")
+
+    blogs = filter_not_archived(blogs)
+
+    print(f"未保存: {len(blogs)}件")
+
     blogs.sort(
-        key=lambda x: x.get("date", "")
+
+        key=lambda x: parse_datetime(
+
+            x["date"]
+
+        )
+
     )
 
     return blogs
