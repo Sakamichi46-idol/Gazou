@@ -626,6 +626,8 @@ def extract_detail_datetime(
         "meta[property='article:published_time']",
         "meta[name='article:published_time']",
         "meta[property='og:published_time']",
+    )
+    
 def extract_detail_datetime(
     soup: BeautifulSoup,
     fallback_date: str = ""
