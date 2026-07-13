@@ -1,4 +1,6 @@
 import asyncio
+import re
+
 from datetime import datetime
 from urllib.parse import (
     parse_qs,
@@ -9,6 +11,13 @@ from urllib.parse import (
 
 import aiohttp
 from bs4 import BeautifulSoup
+
+from archive_config import (
+    ARCHIVE_TEST_LIMIT,
+    DETAIL_REQUEST_DELAY,
+    HTTP_TIMEOUT,
+    PAGE_REQUEST_DELAY,
+)
 
 from archive_parsers.utils import (
     normalize_datetime,
@@ -42,25 +51,31 @@ HEADERS = {
         "image/webp,*/*;q=0.8"
     ),
     "Accept-Language": "ja-JP,ja;q=0.9",
-    "Referer": "https://www.hinatazaka46.com/",
+    "Referer": (
+        "https://www.hinatazaka46.com/"
+        "s/official/diary/member/list"
+    ),
 }
+
+
+# 詳細ページの同時取得数
+DETAIL_CONCURRENCY = 5
 
 
 # =========================
 # URL正規化
 # =========================
 
-def normalize_blog_url(url: str) -> str:
+def normalize_blog_url(
+    url: str
+) -> str:
     """
-    imaやcdなど、変化するクエリ文字列を削除する。
+    imaやcdなどの変動するクエリを削除する。
 
     例:
-    https://www.hinatazaka46.com/s/official/diary/detail/70143
-    ?ima=0000&cd=member
-
+    detail/70143?ima=0000&cd=member
         ↓
-
-    https://www.hinatazaka46.com/s/official/diary/detail/70143
+    detail/70143
     """
 
     if not url:
@@ -90,11 +105,13 @@ def normalize_blog_url(url: str) -> str:
 # 日時ソート用
 # =========================
 
-def datetime_key(blog: dict) -> datetime:
+def datetime_key(
+    blog: dict
+) -> datetime:
     """
     ブログのdateをdatetimeへ変換する。
 
-    変換できない場合は最後に回す。
+    変換できない場合は最後へ回す。
     """
 
     date_text = blog.get(
@@ -107,15 +124,19 @@ def datetime_key(blog: dict) -> datetime:
         "%Y年%m月%d日",
         "%Y-%m-%d %H:%M",
         "%Y-%m-%d",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d",
+        "%Y.%m.%d %H:%M",
+        "%Y.%m.%d",
     )
 
-    for fmt in formats:
+    for date_format in formats:
 
         try:
 
             return datetime.strptime(
                 date_text,
-                fmt
+                date_format
             )
 
         except ValueError:
@@ -135,18 +156,21 @@ async def fetch_html(
 ) -> str:
 
     timeout = aiohttp.ClientTimeout(
-        total=20
+        total=HTTP_TIMEOUT
     )
 
     async with session.get(
         url,
         headers=HEADERS,
-        timeout=timeout
+        timeout=timeout,
+        allow_redirects=True
     ) as response:
 
         response.raise_for_status()
 
-        return await response.text()
+        return await response.text(
+            errors="replace"
+        )
 
 
 # =========================
@@ -176,7 +200,6 @@ async def get_max_page(
             e
         )
 
-        # HTMLから取得できなかった場合の暫定値
         return 850
 
 
@@ -225,7 +248,10 @@ async def get_max_page(
                 page_values[0]
             )
 
-        except (TypeError, ValueError):
+        except (
+            TypeError,
+            ValueError
+        ):
 
             continue
 
@@ -262,12 +288,12 @@ def parse_blog_card(
     card
 ) -> dict | None:
     """
-    一覧ページ上の記事カードから、
+    一覧ページの記事カードから、
 
     ・URL
     ・メンバー
     ・タイトル
-    ・日時
+    ・日付
 
     を取得する。
     """
@@ -277,12 +303,19 @@ def parse_blog_card(
     )
 
 
-    # card自体がaタグの場合
     if not link_tag:
 
         if (
-            getattr(card, "name", None) == "a"
-            and "/diary/detail/" in card.get("href", "")
+            getattr(
+                card,
+                "name",
+                None
+            ) == "a"
+            and "/diary/detail/"
+            in card.get(
+                "href",
+                ""
+            )
         ):
 
             link_tag = card
@@ -301,34 +334,65 @@ def parse_blog_card(
         href
     )
 
+
     if not blog_url:
         return None
 
 
     title_tag = (
-        card.select_one(".c-blog-top__title")
-        or card.select_one(".c-blog-article__title")
-        or card.select_one(".p-blog-top__title")
-        or card.select_one(".title")
-        or card.select_one("h3")
-        or card.select_one("h2")
+        card.select_one(
+            ".c-blog-top__title"
+        )
+        or card.select_one(
+            ".c-blog-article__title"
+        )
+        or card.select_one(
+            ".p-blog-top__title"
+        )
+        or card.select_one(
+            ".title"
+        )
+        or card.select_one(
+            "h3"
+        )
+        or card.select_one(
+            "h2"
+        )
     )
 
 
     member_tag = (
-        card.select_one(".c-blog-top__name")
-        or card.select_one(".c-blog-article__name")
-        or card.select_one(".p-blog-top__name")
-        or card.select_one(".name")
+        card.select_one(
+            ".c-blog-top__name"
+        )
+        or card.select_one(
+            ".c-blog-article__name"
+        )
+        or card.select_one(
+            ".p-blog-top__name"
+        )
+        or card.select_one(
+            ".name"
+        )
     )
 
 
     date_tag = (
-        card.select_one(".c-blog-article__date time")
-        or card.select_one(".c-blog-top__date time")
-        or card.select_one(".p-blog-top__date time")
-        or card.select_one("time")
-        or card.select_one(".date")
+        card.select_one(
+            ".c-blog-article__date time"
+        )
+        or card.select_one(
+            ".c-blog-top__date time"
+        )
+        or card.select_one(
+            ".p-blog-top__date time"
+        )
+        or card.select_one(
+            "time"
+        )
+        or card.select_one(
+            ".date"
+        )
     )
 
 
@@ -378,7 +442,7 @@ def parse_blog_card(
 
 
 # =========================
-# 1ページ取得
+# 一覧1ページ取得
 # =========================
 
 async def get_page_blogs(
@@ -415,13 +479,11 @@ async def get_page_blogs(
     )
 
 
-    # 現行サイトの候補
     cards = soup.select(
         "li.p-blog-top__item"
     )
 
 
-    # フォールバック
     if not cards:
 
         cards = soup.select(
@@ -443,7 +505,6 @@ async def get_page_blogs(
         )
 
 
-    # 最終フォールバック
     if not cards:
 
         cards = soup.select(
@@ -470,6 +531,7 @@ async def get_page_blogs(
             "url",
             ""
         )
+
 
         if not blog_url:
             continue
@@ -502,6 +564,575 @@ async def get_page_blogs(
 
 
 # =========================
+# 詳細ページ日時抽出
+# =========================
+
+def extract_detail_datetime(
+    soup: BeautifulSoup,
+    fallback_date: str = ""
+) -> str:
+    """
+    日向坂46の詳細ページから
+    時刻付き投稿日時を取得する。
+
+    例:
+        2026.7.9 14:37
+            ↓
+        2026年07月09日 14:37
+    """
+
+    # 最初に、日付要素を優先して確認する
+    date_selectors = (
+        ".c-blog-article__date time",
+        ".c-blog-article__date",
+        ".p-blog-article__date time",
+        ".p-blog-article__date",
+        "time[datetime]",
+        "time",
+    )
+
+
+    for selector in date_selectors:
+
+        for date_tag in soup.select(
+            selector
+        ):
+
+            raw_values = []
+
+
+            datetime_attribute = date_tag.get(
+                "datetime",
+                ""
+            )
+
+            if datetime_attribute:
+
+                raw_values.append(
+                    datetime_attribute
+                )
+
+
+            date_text = date_tag.get_text(
+                " ",
+                strip=True
+            )
+
+            if date_text:
+
+                raw_values.append(
+                    date_text
+                )
+
+
+            for raw_value in raw_values:
+
+                parsed = parse_hinata_datetime_text(
+                    raw_value
+                )
+
+                if parsed:
+
+                    return parsed
+
+
+    # metaタグを確認する
+    attribute_selectors = (
+        "meta[property='article:published_time']",
+        "meta[name='article:published_time']",
+        "meta[property='og:published_time']",
+        "meta[itemprop='datePublished']",
+    )
+
+
+    for selector in attribute_selectors:
+
+        for tag in soup.select(
+            selector
+        ):
+
+            raw_value = tag.get(
+                "content",
+                ""
+            )
+
+            if not raw_value:
+                continue
+
+
+            parsed = parse_hinata_datetime_text(
+                raw_value
+            )
+
+            if parsed:
+
+                return parsed
+
+
+    # ページ全体のテキストから探す
+    page_text = soup.get_text(
+        " ",
+        strip=True
+    )
+
+
+    parsed = parse_hinata_datetime_text(
+        page_text
+    )
+
+
+    if parsed:
+
+        return parsed
+
+
+    # 時刻が見つからなければ一覧の日付を使う
+    fallback_normalized = normalize_datetime(
+        fallback_date
+    )
+
+
+    if fallback_normalized:
+
+        return fallback_normalized
+
+
+    return fallback_date
+
+
+# =========================
+# 日向坂日時文字列の解析
+# =========================
+
+def parse_hinata_datetime_text(
+    text: str
+) -> str:
+    """
+    日向坂で使われる複数の日付形式から
+    時刻付き日時を取り出す。
+    """
+
+    if not text:
+        return ""
+
+
+    cleaned_text = (
+        text
+        .replace("\u3000", " ")
+        .replace("\xa0", " ")
+    )
+
+
+    datetime_patterns = (
+        # 2026.7.9 14:37
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*\.\s*"
+        r"(\d{1,2})"
+        r"\s*\.\s*"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*:\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+
+        # 2026/7/9 14:37
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*/\s*"
+        r"(\d{1,2})"
+        r"\s*/\s*"
+        r"(\d{1,2})"
+        r"\s+"
+        r"(\d{1,2})"
+        r"\s*:\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+
+        # 2026-07-09 14:37
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*-\s*"
+        r"(\d{1,2})"
+        r"\s*-\s*"
+        r"(\d{1,2})"
+        r"[T\s]+"
+        r"(\d{1,2})"
+        r"\s*:\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+
+        # 2026年7月9日 14:37
+        r"(?<!\d)"
+        r"(\d{4})"
+        r"\s*年\s*"
+        r"(\d{1,2})"
+        r"\s*月\s*"
+        r"(\d{1,2})"
+        r"\s*日\s*"
+        r"(\d{1,2})"
+        r"\s*:\s*"
+        r"(\d{2})"
+        r"(?!\d)",
+    )
+
+
+    for pattern in datetime_patterns:
+
+        match = re.search(
+            pattern,
+            cleaned_text
+        )
+
+
+        if not match:
+            continue
+
+
+        try:
+
+            parsed_datetime = datetime(
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+                int(match.group(4)),
+                int(match.group(5))
+            )
+
+        except ValueError:
+
+            continue
+
+
+        return parsed_datetime.strftime(
+            "%Y年%m月%d日 %H:%M"
+        )
+
+
+    # ISO 8601形式などはnormalize_datetimeにも渡す
+    normalized = normalize_datetime(
+        cleaned_text
+    )
+
+
+    if (
+        normalized
+        and re.search(
+            r"\d{1,2}:\d{2}",
+            normalized
+        )
+    ):
+
+        return normalized
+
+
+    return ""
+
+
+# =========================
+# 詳細ページ情報補完
+# =========================
+
+async def enrich_blog_detail(
+    session: aiohttp.ClientSession,
+    semaphore: asyncio.Semaphore,
+    blog: dict,
+    index: int,
+    total: int,
+) -> dict:
+
+    url = blog.get(
+        "url",
+        ""
+    )
+
+
+    if not url:
+        return blog
+
+
+    async with semaphore:
+
+        try:
+
+            html = await fetch_html(
+                session,
+                url
+            )
+
+
+            soup = BeautifulSoup(
+                html,
+                "html.parser"
+            )
+
+
+            # -------------------------
+            # 投稿日時
+            # -------------------------
+
+            detail_date = extract_detail_datetime(
+                soup,
+                blog.get(
+                    "date",
+                    ""
+                )
+            )
+
+
+            if detail_date:
+
+                blog["date"] = detail_date
+
+
+            # -------------------------
+            # メンバー
+            # -------------------------
+
+            member_tag = (
+                soup.select_one(
+                    ".c-blog-article__name a"
+                )
+                or soup.select_one(
+                    ".c-blog-article__name"
+                )
+                or soup.select_one(
+                    ".p-blog-article__name a"
+                )
+                or soup.select_one(
+                    ".p-blog-article__name"
+                )
+                or soup.select_one(
+                    ".blog-name"
+                )
+            )
+
+
+            if member_tag:
+
+                member = normalize_member_name(
+                    member_tag.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+
+                if member:
+
+                    blog["member"] = member
+
+
+            # -------------------------
+            # タイトル
+            # -------------------------
+
+            title_tag = (
+                soup.select_one(
+                    ".c-blog-article__title"
+                )
+                or soup.select_one(
+                    ".p-blog-article__title"
+                )
+                or soup.select_one(
+                    ".blog-title"
+                )
+                or soup.select_one(
+                    "h1"
+                )
+            )
+
+
+            if title_tag:
+
+                title = title_tag.get_text(
+                    " ",
+                    strip=True
+                )
+
+
+                if title:
+
+                    blog["title"] = title
+
+
+            # -------------------------
+            # 本文
+            # -------------------------
+
+            body_tag = (
+                soup.select_one(
+                    ".c-blog-article__text"
+                )
+                or soup.select_one(
+                    ".p-blog-article__text"
+                )
+                or soup.select_one(
+                    ".c-blog-article"
+                )
+                or soup.select_one(
+                    "article"
+                )
+            )
+
+
+            if body_tag:
+
+                blog["text"] = str(
+                    body_tag
+                )
+
+
+            if re.search(
+                r"\d{2}:\d{2}",
+                blog.get(
+                    "date",
+                    ""
+                )
+            ):
+
+                status = "時刻取得成功"
+
+            else:
+
+                status = "時刻なし"
+
+
+            print(
+                f"日向坂 詳細取得 "
+                f"{index}/{total}: "
+                f"{blog.get('date', '不明')} / "
+                f"{blog.get('member', '不明')} / "
+                f"{status} / "
+                f"{url}"
+            )
+
+
+        except Exception as e:
+
+            print(
+                "日向坂詳細ページ取得エラー:",
+                url,
+                e
+            )
+
+
+        await asyncio.sleep(
+            DETAIL_REQUEST_DELAY
+        )
+
+
+    return blog
+
+
+# =========================
+# 全詳細情報補完
+# =========================
+
+async def enrich_all_details(
+    session: aiohttp.ClientSession,
+    blogs: list[dict]
+) -> list[dict]:
+
+    if not blogs:
+        return []
+
+
+    print(
+        f"日向坂 詳細日時取得開始: "
+        f"{len(blogs)}件"
+    )
+
+
+    semaphore = asyncio.Semaphore(
+        DETAIL_CONCURRENCY
+    )
+
+
+    tasks = []
+
+
+    for index, blog in enumerate(
+        blogs,
+        start=1
+    ):
+
+        tasks.append(
+            enrich_blog_detail(
+                session,
+                semaphore,
+                blog,
+                index,
+                len(blogs)
+            )
+        )
+
+
+    results = await asyncio.gather(
+        *tasks,
+        return_exceptions=True
+    )
+
+
+    enriched_blogs = []
+
+
+    for original_blog, result in zip(
+        blogs,
+        results
+    ):
+
+        if isinstance(
+            result,
+            Exception
+        ):
+
+            print(
+                "日向坂詳細補完タスクエラー:",
+                result
+            )
+
+            enriched_blogs.append(
+                original_blog
+            )
+
+        else:
+
+            enriched_blogs.append(
+                result
+            )
+
+
+    time_count = sum(
+        1
+        for blog in enriched_blogs
+        if re.search(
+            r"\d{2}:\d{2}",
+            blog.get(
+                "date",
+                ""
+            )
+        )
+    )
+
+
+    print(
+        f"日向坂 詳細日時取得完了: "
+        f"{len(enriched_blogs)}件"
+    )
+
+    print(
+        f"日向坂 時刻取得成功: "
+        f"{time_count}/"
+        f"{len(enriched_blogs)}件"
+    )
+
+
+    return enriched_blogs
+
+
+# =========================
 # 全記事取得
 # =========================
 
@@ -525,6 +1156,25 @@ async def get_all_blogs(
     seen_urls = set()
 
 
+    # テスト中は20件より多めに取得する
+    # 同じ日付の記事を時刻順で並べ替えるため
+    if ARCHIVE_TEST_LIMIT > 0:
+
+        test_candidate_limit = max(
+            ARCHIVE_TEST_LIMIT + 24,
+            ARCHIVE_TEST_LIMIT * 2
+        )
+
+        print(
+            "日向坂 テスト候補取得上限:",
+            f"{test_candidate_limit}件"
+        )
+
+    else:
+
+        test_candidate_limit = 0
+
+
     # 最大ページが最古側
     for page in range(
         max_page,
@@ -544,6 +1194,7 @@ async def get_all_blogs(
                 "url",
                 ""
             )
+
 
             if not blog_url:
                 continue
@@ -568,130 +1219,47 @@ async def get_all_blogs(
         )
 
 
-        # 公式サイトへの連続アクセスを抑える
+        if (
+            test_candidate_limit > 0
+            and len(blogs)
+            >= test_candidate_limit
+        ):
+
+            print(
+                "日向坂 テスト用候補が"
+                "必要数に達したため、"
+                "一覧巡回を終了します。"
+            )
+
+            break
+
+
         await asyncio.sleep(
-            0.5
+            PAGE_REQUEST_DELAY
         )
 
 
     print(
-        f"日向坂 重複除去後: {len(blogs)}件"
+        f"日向坂 重複除去後: "
+        f"{len(blogs)}件"
+    )
+
+
+    # 全候補の詳細ページを開いて
+    # 時刻・タイトル・メンバーを補完する
+    blogs = await enrich_all_details(
+        session,
+        blogs
+    )
+
+
+    # 時刻込みで並べ替える
+    blogs.sort(
+        key=datetime_key
     )
 
 
     return blogs
-
-
-# =========================
-# 詳細ページ補完
-# =========================
-
-async def fill_missing_metadata(
-    session: aiohttp.ClientSession,
-    blog: dict,
-) -> dict:
-    """
-    一覧ページでタイトル・メンバー・日時が
-    取得できなかった場合だけ詳細ページを開く。
-
-    全記事の詳細ページを開かないため、
-    通常より軽くなる。
-    """
-
-    if (
-        blog.get("title")
-        and blog.get("member")
-        and blog.get("date")
-    ):
-
-        return blog
-
-
-    url = blog.get(
-        "url",
-        ""
-    )
-
-    if not url:
-        return blog
-
-
-    try:
-
-        html = await fetch_html(
-            session,
-            url
-        )
-
-    except Exception as e:
-
-        print(
-            "日向坂 詳細補完エラー:",
-            url,
-            e
-        )
-
-        return blog
-
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-
-    if not blog.get("title"):
-
-        title_tag = soup.select_one(
-            ".c-blog-article__title"
-        )
-
-        if title_tag:
-
-            blog["title"] = title_tag.get_text(
-                " ",
-                strip=True
-            )
-
-
-    if not blog.get("member"):
-
-        member_tag = (
-            soup.select_one(
-                ".c-blog-article__name a"
-            )
-            or soup.select_one(
-                ".c-blog-article__name"
-            )
-        )
-
-        if member_tag:
-
-            blog["member"] = normalize_member_name(
-                member_tag.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-
-    if not blog.get("date"):
-
-        date_tag = soup.select_one(
-            ".c-blog-article__date time"
-        )
-
-        if date_tag:
-
-            blog["date"] = normalize_datetime(
-                date_tag.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-
-    return blog
 
 
 # =========================
@@ -707,58 +1275,6 @@ async def get_oldest_first(
     )
 
 
-    # 一覧ページから情報を取れなかった記事だけ補完
-    missing_count = sum(
-        1
-        for blog in blogs
-        if (
-            not blog.get("title")
-            or not blog.get("member")
-            or not blog.get("date")
-        )
-    )
-
-
-    print(
-        f"日向坂 詳細補完対象: "
-        f"{missing_count}件"
-    )
-
-
-    for index, blog in enumerate(
-        blogs,
-        start=1
-    ):
-
-        if (
-            blog.get("title")
-            and blog.get("member")
-            and blog.get("date")
-        ):
-
-            continue
-
-
-        await fill_missing_metadata(
-            session,
-            blog
-        )
-
-
-        if index % 50 == 0:
-
-            print(
-                f"日向坂 詳細補完進捗 "
-                f"{index}/{len(blogs)}"
-            )
-
-
-        await asyncio.sleep(
-            0.3
-        )
-
-
-    # 最終的に日時で正確に並べる
     blogs.sort(
         key=datetime_key
     )
@@ -777,6 +1293,7 @@ async def get_oldest_first(
                 ""
             )
         )
+
 
         print(
             "日向坂 最新:",
