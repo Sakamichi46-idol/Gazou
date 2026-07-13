@@ -57,7 +57,7 @@ HEADERS = {
 
 
 # 詳細ページの同時取得数
-DETAIL_CONCURRENCY = 5
+DETAIL_CONCURRENCY = 1
 
 
 # APIページ巡回の安全上限
