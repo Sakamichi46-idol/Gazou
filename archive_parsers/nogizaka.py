@@ -1171,7 +1171,8 @@ def parse_api_response(
 
 async def fetch_api_items(
     session: aiohttp.ClientSession,
-    page: int | None = None,
+    start: int = 0,
+    row_count: int = 100,
 ):
 
     timeout = aiohttp.ClientTimeout(
@@ -1179,15 +1180,10 @@ async def fetch_api_items(
     )
 
     params = {
-        "page": page, 
-        "rw": 100,
+        "st": start,
+        "rw": row_count,
+        "callback": "res",
     }
-    
-
-    if page is not None:
-
-        params["page"] = page
-
 
     async with session.get(
         API_URL,
@@ -1196,9 +1192,11 @@ async def fetch_api_items(
         timeout=timeout,
         allow_redirects=True
     ) as response:
+
         print(
-            f"乃木坂 APIリクエスト page={page}:",
-            response.url
+            f"乃木坂 APIリクエスト "
+            f"st={start}: "
+            f"{response.url}"
         )
 
         response.raise_for_status()
@@ -1207,30 +1205,23 @@ async def fetch_api_items(
             errors="replace"
         )
 
-
     data = parse_api_response(
         text
     )
 
-
     if not data:
-
         return [], {}
-
 
     items = data.get(
         "data",
         []
     )
 
-
     if not isinstance(
         items,
         list
     ):
-
         items = []
-
 
     return items, data
 
@@ -1745,28 +1736,33 @@ async def get_all_blog_urls(
     session: aiohttp.ClientSession
 ) -> list[dict]:
 
+    row_count = 100
+    start = 0
+
     print(
-        "乃木坂 API page=1 から"
-        "最終ページまで巡回します。"
+        "乃木坂 API st=0 から"
+        "全記事を巡回します。"
     )
 
-
     blogs = []
-
     seen_urls = set()
 
     previous_page_urls = None
 
-    page = 1
+    # 無限ループ防止
+    max_requests = 3000
+    request_count = 0
 
+    while request_count < max_requests:
 
-    while page <= API_MAX_PAGE:
+        request_count += 1
 
         try:
 
             items, data = await fetch_api_items(
                 session,
-                page=page
+                start=start,
+                row_count=row_count
             )
 
         except asyncio.CancelledError:
@@ -1776,26 +1772,23 @@ async def get_all_blog_urls(
         except Exception as e:
 
             print(
-                f"乃木坂 API page={page} "
+                f"乃木坂 API st={start} "
                 f"取得エラー:",
                 e
             )
 
             break
 
-
         if not items:
 
             print(
-                f"乃木坂 API page={page}: "
+                f"乃木坂 API st={start}: "
                 "記事0件のため巡回終了"
             )
 
             break
 
-
         page_blogs = []
-
 
         for item in items:
 
@@ -1809,7 +1802,6 @@ async def get_all_blog_urls(
                     blog
                 )
 
-
         page_urls = [
             blog.get(
                 "url",
@@ -1821,28 +1813,21 @@ async def get_all_blog_urls(
             )
         ]
 
-
-        # page指定が無視され、
-        # 前ページと同じ内容になった場合
         if (
             previous_page_urls is not None
             and page_urls == previous_page_urls
         ):
 
             print(
-                f"乃木坂 API page={page}: "
-                "前ページと同じ内容のため"
-                "巡回終了"
+                f"乃木坂 API st={start}: "
+                "前回と同じ内容のため巡回終了"
             )
 
             break
 
-
         previous_page_urls = page_urls
 
-
         new_count = 0
-
 
         for blog in page_blogs:
 
@@ -1867,31 +1852,26 @@ async def get_all_blog_urls(
 
             new_count += 1
 
-
         print(
-            f"乃木坂 API page={page}: "
+            f"乃木坂 API st={start}: "
             f"{len(items)}件 / "
             f"新規{new_count}件 / "
             f"合計{len(blogs)}件"
         )
 
-
         if new_count == 0:
 
             print(
-                f"乃木坂 API page={page}: "
+                f"乃木坂 API st={start}: "
                 "新しい記事URLがないため"
                 "巡回終了"
             )
 
             break
 
-
-        # APIが返す総件数が取得できる場合
         total_count = data.get(
             "count"
         )
-
 
         try:
 
@@ -1906,10 +1886,16 @@ async def get_all_blog_urls(
 
             total_count = 0
 
+        print(
+            "乃木坂 API総件数:",
+            total_count
+            if total_count > 0
+            else "不明"
+        )
 
         if (
             total_count > 0
-            and len(seen_urls) >= total_count
+            and start + len(items) >= total_count
         ):
 
             print(
@@ -1920,29 +1906,25 @@ async def get_all_blog_urls(
 
             break
 
-
-        page += 1
-
+        # 100件分、取得開始位置を進める
+        start += row_count
 
         await asyncio.sleep(
             PAGE_REQUEST_DELAY
         )
-
 
     else:
 
         print(
             "⚠️ 乃木坂 API安全上限へ"
             "到達したため巡回終了:",
-            API_MAX_PAGE
+            max_requests
         )
-
 
     print(
         f"乃木坂 API一覧取得完了: "
         f"{len(blogs)}件"
     )
-
 
     return blogs
 
