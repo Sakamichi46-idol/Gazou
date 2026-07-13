@@ -80,7 +80,7 @@ PAGE_REQUEST_DELAY = float(
 DETAIL_REQUEST_DELAY = float(
     os.getenv(
         "DETAIL_REQUEST_DELAY",
-        "0.3"
+        "2.0"
     )
 )
 
