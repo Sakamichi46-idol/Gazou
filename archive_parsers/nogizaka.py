@@ -1178,7 +1178,11 @@ async def fetch_api_items(
         total=HTTP_TIMEOUT
     )
 
-    params = {}
+    params = {
+        "page": page, 
+        "rw": 100,
+    }
+    
 
     if page is not None:
 
@@ -1192,6 +1196,10 @@ async def fetch_api_items(
         timeout=timeout,
         allow_redirects=True
     ) as response:
+        print(
+            f"乃木坂 APIリクエスト page={page}:",
+            response.url
+        )
 
         response.raise_for_status()
 
