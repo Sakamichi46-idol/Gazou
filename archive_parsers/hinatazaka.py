@@ -1140,14 +1140,9 @@ async def get_all_blogs(
     session: aiohttp.ClientSession
 ) -> list[dict]:
 
-    max_page = await get_max_page(
-        session
-    )
-
-
     print(
-        f"日向坂 page={max_page} から"
-        "古い順に巡回します。"
+        "日向坂 page=0 から"
+        "最終ページまで巡回します。"
     )
 
 
@@ -1155,37 +1150,74 @@ async def get_all_blogs(
 
     seen_urls = set()
 
+    previous_page_urls = None
 
-    # テスト中は20件より多めに取得する
-    # 同じ日付の記事を時刻順で並べ替えるため
-    if ARCHIVE_TEST_LIMIT > 0:
+    page = 0
 
-        test_candidate_limit = max(
-            ARCHIVE_TEST_LIMIT + 24,
-            ARCHIVE_TEST_LIMIT * 2
-        )
-
-        print(
-            "日向坂 テスト候補取得上限:",
-            f"{test_candidate_limit}件"
-        )
-
-    else:
-
-        test_candidate_limit = 0
+    # 無限ループ防止用
+    max_safety_page = 3000
 
 
-    # 最大ページが最古側
-    for page in range(
-        max_page,
-        -1,
-        -1
-    ):
+    while page <= max_safety_page:
 
         page_blogs = await get_page_blogs(
             session,
             page
         )
+
+
+        # -------------------------
+        # 記事が0件なら終了
+        # -------------------------
+
+        if not page_blogs:
+
+            print(
+                f"日向坂 page={page}: "
+                "記事が0件のため巡回終了"
+            )
+
+            break
+
+
+        page_urls = [
+
+            blog.get(
+                "url",
+                ""
+            )
+
+            for blog in page_blogs
+
+            if blog.get(
+                "url"
+            )
+
+        ]
+
+
+        # -------------------------
+        # 前ページと同一なら終了
+        # -------------------------
+
+        if (
+            previous_page_urls is not None
+            and page_urls == previous_page_urls
+        ):
+
+            print(
+                f"日向坂 page={page}: "
+                "前ページと同じ記事が返されたため"
+                "巡回終了"
+            )
+
+            break
+
+
+        previous_page_urls = page_urls
+
+
+        new_count = 0
 
 
         for blog in page_blogs:
@@ -1197,10 +1229,12 @@ async def get_all_blogs(
 
 
             if not blog_url:
+
                 continue
 
 
             if blog_url in seen_urls:
+
                 continue
 
 
@@ -1212,30 +1246,88 @@ async def get_all_blogs(
                 blog
             )
 
+            new_count += 1
+
 
         print(
             f"日向坂 進捗 page={page} / "
+            f"新規{new_count}件 / "
             f"合計{len(blogs)}件"
         )
 
 
-        if (
-            test_candidate_limit > 0
-            and len(blogs)
-            >= test_candidate_limit
-        ):
+        # -------------------------
+        # 新しいURLが0件なら終了
+        # -------------------------
+
+        if new_count == 0:
 
             print(
-                "日向坂 テスト用候補が"
-                "必要数に達したため、"
-                "一覧巡回を終了します。"
+                f"日向坂 page={page}: "
+                "新しい記事URLがなかったため"
+                "巡回終了"
             )
 
             break
 
 
+        page += 1
+
+
+        # 公式サイトへの連続アクセスを抑える
         await asyncio.sleep(
             PAGE_REQUEST_DELAY
+        )
+
+
+    else:
+
+        print(
+            "⚠️ 日向坂 安全上限ページに"
+            "到達したため巡回を終了しました:",
+            max_safety_page
+        )
+
+
+    print(
+        f"日向坂 一覧取得完了: "
+        f"{len(blogs)}件"
+    )
+
+
+    # 一覧から取得した日付で、
+    # いったん古い順に並べる
+    blogs.sort(
+        key=datetime_key
+    )
+
+
+    # -------------------------
+    # テスト中は詳細取得対象を絞る
+    # -------------------------
+
+    if ARCHIVE_TEST_LIMIT > 0:
+
+        candidate_limit = max(
+            ARCHIVE_TEST_LIMIT + 24,
+            ARCHIVE_TEST_LIMIT * 2
+        )
+
+
+        before_count = len(
+            blogs
+        )
+
+
+        blogs = blogs[
+            :candidate_limit
+        ]
+
+
+        print(
+            "日向坂 詳細取得候補制限:",
+            f"{before_count}件 → "
+            f"{len(blogs)}件"
         )
 
 
@@ -1245,22 +1337,21 @@ async def get_all_blogs(
     )
 
 
-    # 全候補の詳細ページを開いて
-    # 時刻・タイトル・メンバーを補完する
+    # 選ばれた候補だけ詳細ページを開き、
+    # 正確な時刻を取得する
     blogs = await enrich_all_details(
         session,
         blogs
     )
 
 
-    # 時刻込みで並べ替える
+    # 時刻込みで最終的に古い順へ並べる
     blogs.sort(
         key=datetime_key
     )
 
 
     return blogs
-
 
 # =========================
 # archive_checker用
