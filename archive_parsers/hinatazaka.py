@@ -1319,9 +1319,15 @@ async def get_all_blogs(
         )
 
 
-        blogs = blogs[
-            :candidate_limit
-        ]
+        # page=0から新しい順に巡回しているため、
+        # blogsの後ろ側が最も古い記事になる。
+        # 一覧の日付は形式によって解析できないことがあるため、
+        # 詳細取得前には日時ソートを行わない。
+        if len(blogs) > candidate_limit:
+
+            blogs = blogs[
+                -candidate_limit:
+            ]
 
 
         print(
