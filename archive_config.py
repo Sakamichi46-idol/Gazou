@@ -39,7 +39,7 @@ SEND_DELAY = float(
 ARCHIVE_TEST_LIMIT = int(
     os.getenv(
         "ARCHIVE_TEST_LIMIT",
-        "20"
+        "0"
     )
 )
 
