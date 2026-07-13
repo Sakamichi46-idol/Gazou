@@ -1,7 +1,7 @@
 import os
 import sqlite3
 
-DB_DIR = "data"
+DB_DIR = "/data"
 DB_NAME = "archive.db"
 
 os.makedirs(DB_DIR, exist_ok=True)
