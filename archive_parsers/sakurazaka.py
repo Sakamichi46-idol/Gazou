@@ -114,6 +114,8 @@ def datetime_key(
         "%Y-%m-%d",
         "%Y/%m/%d %H:%M",
         "%Y/%m/%d",
+        "%Y %m %d %H:%M",
+        "%Y %m %d",
     )
 
     for date_format in formats:
