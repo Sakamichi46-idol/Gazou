@@ -1,13 +1,25 @@
 import asyncio
 import json
 import re
+import unicodedata
 
 from datetime import datetime
 from html import unescape
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import (
+    urljoin,
+    urlsplit,
+    urlunsplit,
+)
 
 import aiohttp
 from bs4 import BeautifulSoup
+
+from archive_config import (
+    ARCHIVE_TEST_LIMIT,
+    DETAIL_REQUEST_DELAY,
+    HTTP_TIMEOUT,
+    PAGE_REQUEST_DELAY,
+)
 
 from archive_parsers.utils import (
     normalize_datetime,
@@ -18,6 +30,8 @@ from archive_parsers.utils import (
 # =========================
 # 基本設定
 # =========================
+
+BASE_URL = "https://www.nogizaka46.com"
 
 API_URL = (
     "https://www.nogizaka46.com"
@@ -45,8 +59,127 @@ HEADERS = {
 # 詳細ページの同時取得数
 DETAIL_CONCURRENCY = 5
 
-# 詳細ページ取得後の待機時間
-DETAIL_DELAY = 0.2
+
+# APIページ巡回の安全上限
+API_MAX_PAGE = 3000
+
+
+# =========================
+# 除外する投稿者
+# =========================
+
+IGNORED_MEMBER_NAMES = {
+    "運営スタッフ",
+    "スタッフ",
+    "乃木坂46運営委員会",
+}
+
+
+# =========================
+# 期別表記
+# =========================
+
+GENERATION_NAMES = {
+    "3期生",
+    "4期生",
+    "新4期生",
+    "5期生",
+    "6期生",
+}
+
+
+# =========================
+# 乃木坂メンバー一覧
+# =========================
+#
+# 過去記事のアーカイブにも使うため、
+# 卒業済みメンバーも残している。
+# =========================
+
+NOGIZAKA_MEMBER_NAMES = [
+    # -------------------------
+    # 3期生
+    # -------------------------
+    "伊藤理々杏",
+    "岩本蓮加",
+    "梅澤美波",
+    "大園桃子",
+    "久保史緒里",
+    "阪口珠美",
+    "佐藤楓",
+    "中村麗乃",
+    "向井葉月",
+    "山下美月",
+    "吉田綾乃クリスティー",
+    "与田祐希",
+
+    # -------------------------
+    # 4期生・新4期生
+    # -------------------------
+    "遠藤さくら",
+    "賀喜遥香",
+    "掛橋沙耶香",
+    "金川紗耶",
+    "北川悠理",
+    "黒見明香",
+    "佐藤璃果",
+    "柴田柚菜",
+    "清宮レイ",
+    "田村真佑",
+    "筒井あやめ",
+    "早川聖来",
+    "林瑠奈",
+    "松尾美佑",
+    "矢久保美緒",
+    "弓木奈於",
+
+    # -------------------------
+    # 5期生
+    # -------------------------
+    "五百城茉央",
+    "池田瑛紗",
+    "一ノ瀬美空",
+    "井上和",
+    "岡本姫奈",
+    "小川彩",
+    "奥田いろは",
+    "川﨑桜",
+    "菅原咲月",
+    "冨里奈央",
+    "中西アルノ",
+
+    # -------------------------
+    # 6期生
+    # -------------------------
+    "愛宕心響",
+    "大越ひなの",
+    "小津玲奈",
+    "海邉朱莉",
+    "川端晃菜",
+    "鈴木佑捺",
+    "瀬戸口心月",
+    "長嶋凛桜",
+    "増田三莉音",
+    "森平麗心",
+    "矢田萌華",
+]
+
+
+# =========================
+# 名前の別表記
+# =========================
+
+NOGIZAKA_MEMBER_ALIASES = {
+    # 一覧タイトルで「理」が省略されている記事
+    "伊藤理々杏": [
+        "伊藤々杏",
+    ],
+
+    # 崎の字形違いへの保険
+    "川﨑桜": [
+        "川崎桜",
+    ],
+}
 
 
 # =========================
@@ -57,20 +190,27 @@ def normalize_blog_url(
     url: str
 ) -> str:
     """
-    imaなど、記事内容と関係のない
-    クエリ文字列を削除する。
+    URLを絶対URLへ変換し、
+    imaなどの変動するクエリを削除する。
 
     例:
-    detail/104610?ima=5638
-        ↓
-    detail/104610
+        /s/n46/diary/detail/101102?ima=0710
+
+            ↓
+
+        https://www.nogizaka46.com/s/n46/diary/detail/101102
     """
 
     if not url:
         return ""
 
-    parts = urlsplit(
+    full_url = urljoin(
+        BASE_URL,
         url
+    )
+
+    parts = urlsplit(
+        full_url
     )
 
     return urlunsplit(
@@ -85,6 +225,455 @@ def normalize_blog_url(
 
 
 # =========================
+# 名前検索用の正規化
+# =========================
+
+def normalize_name_for_search(
+    value: str
+) -> str:
+    """
+    名前の比較用に表記を統一する。
+
+    次の表記はすべて同じ文字列になる。
+
+        大越　ひなの
+        大越 ひなの
+        大越ひなの
+
+            ↓
+
+        大越ひなの
+
+    全角数字なども半角へ統一する。
+    """
+
+    if not value:
+        return ""
+
+    value = unescape(
+        str(value)
+    )
+
+    value = unicodedata.normalize(
+        "NFKC",
+        value
+    )
+
+    value = re.sub(
+        r"[\s\u3000]+",
+        "",
+        value
+    )
+
+    return value.strip()
+
+
+# =========================
+# 検索対象テキストの正規化
+# =========================
+
+def normalize_search_text(
+    *values
+) -> str:
+    """
+    タイトルや本文からHTMLタグを除去し、
+    空白・改行・タブをすべて削除する。
+    """
+
+    combined = " ".join(
+        str(value or "")
+        for value in values
+    )
+
+    if not combined:
+        return ""
+
+    plain_text = BeautifulSoup(
+        combined,
+        "html.parser"
+    ).get_text(
+        " ",
+        strip=True
+    )
+
+    plain_text = unescape(
+        plain_text
+    )
+
+    plain_text = unicodedata.normalize(
+        "NFKC",
+        plain_text
+    )
+
+    return re.sub(
+        r"[\s\u3000]+",
+        "",
+        plain_text
+    )
+
+
+# =========================
+# 期別表記の正規化
+# =========================
+
+def normalize_generation_name(
+    member: str
+) -> str:
+    """
+    ３期生、新４期生などの全角表記を
+    3期生、新4期生へ統一する。
+    """
+
+    normalized = normalize_name_for_search(
+        member
+    )
+
+    generation_aliases = {
+        "3期生": "3期生",
+        "三期生": "3期生",
+
+        "4期生": "4期生",
+        "四期生": "4期生",
+
+        "新4期生": "新4期生",
+        "新四期生": "新4期生",
+
+        "5期生": "5期生",
+        "五期生": "5期生",
+
+        "6期生": "6期生",
+        "六期生": "6期生",
+    }
+
+    return generation_aliases.get(
+        normalized,
+        normalized
+    )
+
+
+# =========================
+# 除外対象判定
+# =========================
+
+def is_ignored_member(
+    member: str
+) -> bool:
+
+    normalized_member = normalize_name_for_search(
+        member
+    )
+
+    ignored_names = {
+        normalize_name_for_search(
+            name
+        )
+        for name in IGNORED_MEMBER_NAMES
+    }
+
+    return normalized_member in ignored_names
+
+
+# =========================
+# 正式名へ統一
+# =========================
+
+def canonicalize_member_name(
+    member: str
+) -> str:
+    """
+    すでに個人名が取得できている場合に、
+    空白表記などを正式名へ統一する。
+
+    例:
+        大越　ひなの
+        大越 ひなの
+
+            ↓
+
+        大越ひなの
+    """
+
+    normalized_member = normalize_name_for_search(
+        member
+    )
+
+    if not normalized_member:
+        return ""
+
+    for official_name in NOGIZAKA_MEMBER_NAMES:
+
+        if (
+            normalize_name_for_search(
+                official_name
+            )
+            == normalized_member
+        ):
+
+            return official_name
+
+    for official_name, aliases in (
+        NOGIZAKA_MEMBER_ALIASES.items()
+    ):
+
+        for alias in aliases:
+
+            if (
+                normalize_name_for_search(
+                    alias
+                )
+                == normalized_member
+            ):
+
+                return official_name
+
+    return normalize_member_name(
+        member
+    )
+
+
+# =========================
+# テキスト内のメンバー名検索
+# =========================
+
+def find_member_in_text(
+    text: str
+) -> str:
+    """
+    正式名・別名をテキストから検索する。
+
+    複数のメンバー名が見つかった場合は、
+    テキスト内で最も前に登場する名前を返す。
+    """
+
+    search_text = normalize_search_text(
+        text
+    )
+
+    if not search_text:
+        return ""
+
+    matches = []
+
+
+    # 正式名
+    for official_name in NOGIZAKA_MEMBER_NAMES:
+
+        normalized_name = normalize_name_for_search(
+            official_name
+        )
+
+        if not normalized_name:
+            continue
+
+        position = search_text.find(
+            normalized_name
+        )
+
+        if position >= 0:
+
+            matches.append(
+                (
+                    position,
+                    -len(normalized_name),
+                    official_name
+                )
+            )
+
+
+    # 別名
+    for official_name, aliases in (
+        NOGIZAKA_MEMBER_ALIASES.items()
+    ):
+
+        for alias in aliases:
+
+            normalized_alias = (
+                normalize_name_for_search(
+                    alias
+                )
+            )
+
+            if not normalized_alias:
+                continue
+
+            position = search_text.find(
+                normalized_alias
+            )
+
+            if position >= 0:
+
+                matches.append(
+                    (
+                        position,
+                        -len(normalized_alias),
+                        official_name
+                    )
+                )
+
+
+    if not matches:
+        return ""
+
+
+    # 最も前に出た名前を優先。
+    # 同じ位置なら長い名前を優先。
+    matches.sort()
+
+    return matches[0][2]
+
+
+# =========================
+# 期別ブログから個人を判定
+# =========================
+
+def resolve_nogizaka_member(
+    member: str,
+    title: str = "",
+    text: str = "",
+) -> str:
+    """
+    memberが「3期生」「新4期生」「5期生」などの場合、
+    タイトルと本文から投稿者の個人名を判定する。
+
+    判定順:
+        1. タイトル
+        2. 本文の冒頭
+        3. 本文全体
+
+    すでに個人名の場合は正式表記へ統一する。
+    運営スタッフの場合は空文字を返す。
+    """
+
+    normalized_member = normalize_member_name(
+        member
+    )
+
+    if is_ignored_member(
+        normalized_member
+    ):
+
+        return ""
+
+
+    generation_name = normalize_generation_name(
+        normalized_member
+    )
+
+
+    # すでに個人名なら正式名へ統一
+    if generation_name not in GENERATION_NAMES:
+
+        return canonicalize_member_name(
+            normalized_member
+        )
+
+
+    # -------------------------
+    # 1. タイトルを最優先
+    # -------------------------
+
+    found_member = find_member_in_text(
+        title
+    )
+
+    if found_member:
+
+        return found_member
+
+
+    # -------------------------
+    # 本文をプレーンテキスト化
+    # -------------------------
+
+    body_plain_text = BeautifulSoup(
+        str(text or ""),
+        "html.parser"
+    ).get_text(
+        " ",
+        strip=True
+    )
+
+
+    # -------------------------
+    # 2. 本文冒頭を検索
+    # -------------------------
+    #
+    # 本文全体には別メンバー名が
+    # 多数含まれる場合があるため、
+    # まず冒頭3000文字を優先する。
+    # -------------------------
+
+    body_head = body_plain_text[
+        :3000
+    ]
+
+    found_member = find_member_in_text(
+        body_head
+    )
+
+    if found_member:
+
+        return found_member
+
+
+    # -------------------------
+    # 3. 本文全体を検索
+    # -------------------------
+
+    found_member = find_member_in_text(
+        body_plain_text
+    )
+
+    if found_member:
+
+        return found_member
+
+
+    # 判定できなければ期別表記を残す
+    return generation_name
+
+
+# =========================
+# 日時ソート用
+# =========================
+
+def datetime_key(
+    blog: dict
+) -> datetime:
+
+    date_text = blog.get(
+        "date",
+        ""
+    )
+
+    formats = (
+        "%Y年%m月%d日 %H:%M",
+        "%Y年%m月%d日",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d",
+        "%Y.%m.%d %H:%M",
+        "%Y.%m.%d",
+    )
+
+    for date_format in formats:
+
+        try:
+
+            return datetime.strptime(
+                date_text,
+                date_format
+            )
+
+        except ValueError:
+
+            continue
+
+    return datetime.max
+
+
+# =========================
 # 日時文字列を探す
 # =========================
 
@@ -93,17 +682,11 @@ def find_datetime_in_text(
     require_time: bool = False
 ) -> str:
     """
-    文字列の中から日時を探して、
+    文字列から日時を探して、
 
         2026年05月26日 21:45
 
     の形式で返す。
-
-    対応例:
-        2026.05.26 21:45
-        2026/05/26 21:45
-        2026-05-26 21:45
-        2026年05月26日 21:45
     """
 
     if not text:
@@ -111,6 +694,11 @@ def find_datetime_in_text(
 
     text = unescape(
         str(text)
+    )
+
+    text = unicodedata.normalize(
+        "NFKC",
+        text
     )
 
     text = text.replace(
@@ -125,7 +713,10 @@ def find_datetime_in_text(
     ).strip()
 
 
-    # 時刻付き日時を最優先
+    # -------------------------
+    # 時刻付き
+    # -------------------------
+
     time_match = re.search(
         r"""
         (?P<year>\d{4})
@@ -139,7 +730,7 @@ def find_datetime_in_text(
         (?P<day>\d{1,2})
         \s*
         日?
-        \s*
+        [T\s]+
         (?P<hour>\d{1,2})
         \s*
         [:：]
@@ -155,40 +746,37 @@ def find_datetime_in_text(
 
         try:
 
-            year = int(
-                time_match.group("year")
+            parsed_datetime = datetime(
+                int(
+                    time_match.group(
+                        "year"
+                    )
+                ),
+                int(
+                    time_match.group(
+                        "month"
+                    )
+                ),
+                int(
+                    time_match.group(
+                        "day"
+                    )
+                ),
+                int(
+                    time_match.group(
+                        "hour"
+                    )
+                ),
+                int(
+                    time_match.group(
+                        "minute"
+                    )
+                )
             )
 
-            month = int(
-                time_match.group("month")
-            )
-
-            day = int(
-                time_match.group("day")
-            )
-
-            hour = int(
-                time_match.group("hour")
-            )
-
-            minute = int(
-                time_match.group("minute")
-            )
-
-
-            value = datetime(
-                year,
-                month,
-                day,
-                hour,
-                minute
-            )
-
-
-            return value.strftime(
+            return parsed_datetime.strftime(
                 "%Y年%m月%d日 %H:%M"
             )
-
 
         except ValueError:
 
@@ -196,10 +784,14 @@ def find_datetime_in_text(
 
 
     if require_time:
+
         return ""
 
 
+    # -------------------------
     # 日付のみ
+    # -------------------------
+
     date_match = re.search(
         r"""
         (?P<year>\d{4})
@@ -223,30 +815,27 @@ def find_datetime_in_text(
 
         try:
 
-            year = int(
-                date_match.group("year")
+            parsed_date = datetime(
+                int(
+                    date_match.group(
+                        "year"
+                    )
+                ),
+                int(
+                    date_match.group(
+                        "month"
+                    )
+                ),
+                int(
+                    date_match.group(
+                        "day"
+                    )
+                )
             )
 
-            month = int(
-                date_match.group("month")
-            )
-
-            day = int(
-                date_match.group("day")
-            )
-
-
-            value = datetime(
-                year,
-                month,
-                day
-            )
-
-
-            return value.strftime(
+            return parsed_date.strftime(
                 "%Y年%m月%d日"
             )
-
 
         except ValueError:
 
@@ -257,28 +846,15 @@ def find_datetime_in_text(
 
 
 # =========================
-# 日付部分を取得
+# 日付部分だけ取得
 # =========================
 
 def get_date_only(
     date_text: str
 ) -> str:
-    """
-    2026年05月26日 21:45
-        ↓
-    2026年05月26日
-    """
 
     if not date_text:
         return ""
-
-    match = re.search(
-        r"\d{4}年\d{2}月\d{2}日",
-        date_text
-    )
-
-    if match:
-        return match.group(0)
 
     normalized = normalize_datetime(
         date_text
@@ -290,6 +866,7 @@ def get_date_only(
     )
 
     if match:
+
         return match.group(0)
 
     return ""
@@ -304,19 +881,6 @@ def extract_detail_datetime(
     html: str,
     fallback_date: str = ""
 ) -> str:
-    """
-    詳細ページから時刻付き日時を取得する。
-
-    取得順:
-    1. 日付・時刻用要素
-    2. 日付要素の親要素
-    3. 記事ヘッダー
-    4. metaタグ
-    5. timeタグのdatetime属性
-    6. HTML全体
-
-    APIの日付と同じ日の時刻付き日時を優先する。
-    """
 
     fallback_day = get_date_only(
         fallback_date
@@ -340,14 +904,11 @@ def extract_detail_datetime(
             return
 
         if value not in candidates:
+
             candidates.append(
                 value
             )
 
-
-    # -------------------------
-    # 日付・時刻要素
-    # -------------------------
 
     selectors = (
         ".bd--hd__date",
@@ -377,8 +938,6 @@ def extract_detail_datetime(
                 )
             )
 
-
-            # datetime属性
             add_candidate(
                 tag.get(
                     "datetime",
@@ -386,8 +945,6 @@ def extract_detail_datetime(
                 )
             )
 
-
-            # content属性
             add_candidate(
                 tag.get(
                     "content",
@@ -395,9 +952,6 @@ def extract_detail_datetime(
                 )
             )
 
-
-            # 親要素に日付と時刻が
-            # 分かれている場合に対応
             if tag.parent:
 
                 add_candidate(
@@ -407,10 +961,6 @@ def extract_detail_datetime(
                     )
                 )
 
-
-    # -------------------------
-    # metaタグ
-    # -------------------------
 
     meta_selectors = (
         "meta[property='article:published_time']",
@@ -436,15 +986,17 @@ def extract_detail_datetime(
             )
 
 
-    # -------------------------
-    # JSON-LD
-    # -------------------------
-
     for script in soup.select(
         "script[type='application/ld+json']"
     ):
 
-        script_text = script.string
+        script_text = (
+            script.string
+            or script.get_text(
+                " ",
+                strip=True
+            )
+        )
 
         if not script_text:
             continue
@@ -456,7 +1008,6 @@ def extract_detail_datetime(
                 script_text
             )
 
-
             json_items = (
                 json_data
                 if isinstance(
@@ -466,16 +1017,13 @@ def extract_detail_datetime(
                 else [json_data]
             )
 
-
             for item in json_items:
 
                 if not isinstance(
                     item,
                     dict
                 ):
-
                     continue
-
 
                 add_candidate(
                     item.get(
@@ -491,29 +1039,19 @@ def extract_detail_datetime(
                     )
                 )
 
-
         except Exception:
 
-            # JSONとして読めなくても
-            # 文字列内の日時を候補にする
             add_candidate(
                 script_text
             )
 
-
-    # -------------------------
-    # HTML全体
-    # -------------------------
 
     add_candidate(
         html
     )
 
 
-    # -------------------------
-    # 1. 同じ日＋時刻ありを優先
-    # -------------------------
-
+    # APIの日付と同じ日の時刻付きを優先
     for candidate in candidates:
 
         found = find_datetime_in_text(
@@ -521,28 +1059,20 @@ def extract_detail_datetime(
             require_time=True
         )
 
-
         if not found:
             continue
 
-
-        found_day = get_date_only(
-            found
-        )
-
-
         if (
             fallback_day
-            and found_day == fallback_day
+            and get_date_only(
+                found
+            ) == fallback_day
         ):
 
             return found
 
 
-    # -------------------------
-    # 2. 日付指定なしで時刻付きを探す
-    # -------------------------
-
+    # 日付に関係なく時刻付きを探す
     for candidate in candidates:
 
         found = find_datetime_in_text(
@@ -550,15 +1080,12 @@ def extract_detail_datetime(
             require_time=True
         )
 
-
         if found:
+
             return found
 
 
-    # -------------------------
-    # 3. 時刻なしの日付
-    # -------------------------
-
+    # 同じ日の時刻なし
     for candidate in candidates:
 
         found = find_datetime_in_text(
@@ -566,25 +1093,19 @@ def extract_detail_datetime(
             require_time=False
         )
 
-
         if not found:
             continue
 
-
-        found_day = get_date_only(
-            found
-        )
-
-
         if (
             fallback_day
-            and found_day == fallback_day
+            and get_date_only(
+                found
+            ) == fallback_day
         ):
 
             return found
 
 
-    # 最後はAPI側の日付を使う
     return normalize_datetime(
         fallback_date
     )
@@ -603,7 +1124,6 @@ def parse_api_response(
 
 
     # JSONP形式
-    # res({...})
     match = re.search(
         r"^\s*res\((.*)\)\s*;?\s*$",
         text,
@@ -629,7 +1149,6 @@ def parse_api_response(
             return None
 
 
-    # 通常JSON形式
     try:
 
         return json.loads(
@@ -652,24 +1171,33 @@ def parse_api_response(
 
 async def fetch_api_items(
     session: aiohttp.ClientSession,
-    params=None
+    page: int | None = None,
 ):
 
     timeout = aiohttp.ClientTimeout(
-        total=20
+        total=HTTP_TIMEOUT
     )
+
+    params = {}
+
+    if page is not None:
+
+        params["page"] = page
 
 
     async with session.get(
         API_URL,
-        params=params or {},
+        params=params,
         headers=HEADERS,
-        timeout=timeout
+        timeout=timeout,
+        allow_redirects=True
     ) as response:
 
         response.raise_for_status()
 
-        text = await response.text()
+        text = await response.text(
+            errors="replace"
+        )
 
 
     data = parse_api_response(
@@ -712,23 +1240,64 @@ def convert_item(
         ""
     )
 
-
     blog_url = normalize_blog_url(
         raw_url
     )
-
 
     if not blog_url:
 
         return None
 
 
-    member = normalize_member_name(
+    title = (
+        item.get(
+            "title",
+            ""
+        )
+        or ""
+    )
+
+
+    text = (
+        item.get(
+            "text",
+            ""
+        )
+        or ""
+    )
+
+
+    raw_member = normalize_member_name(
         item.get(
             "name",
             ""
         )
     )
+
+
+    # 運営スタッフは除外
+    if is_ignored_member(
+        raw_member
+    ):
+
+        print(
+            "乃木坂 運営スタッフ記事を除外:",
+            blog_url
+        )
+
+        return None
+
+
+    member = resolve_nogizaka_member(
+        raw_member,
+        title,
+        text
+    )
+
+
+    if not member:
+
+        return None
 
 
     date = normalize_datetime(
@@ -743,15 +1312,9 @@ def convert_item(
         "group": "乃木坂46",
         "url": blog_url,
         "member": member,
-        "title": item.get(
-            "title",
-            ""
-        ) or "",
+        "title": title,
         "date": date,
-        "text": item.get(
-            "text",
-            ""
-        ) or ""
+        "text": text,
     }
 
 
@@ -765,7 +1328,7 @@ async def fetch_detail_html(
 ) -> str:
 
     timeout = aiohttp.ClientTimeout(
-        total=20
+        total=HTTP_TIMEOUT
     )
 
 
@@ -795,7 +1358,7 @@ async def fetch_detail_html(
 
 
 # =========================
-# 詳細ページから情報取得
+# 詳細ページ情報補完
 # =========================
 
 async def enrich_blog_detail(
@@ -805,15 +1368,6 @@ async def enrich_blog_detail(
     index: int,
     total: int
 ) -> dict:
-    """
-    詳細ページから、
-
-    ・時刻を含む投稿日
-    ・メンバー名
-    ・タイトル
-
-    を補完する。
-    """
 
     url = blog.get(
         "url",
@@ -846,16 +1400,13 @@ async def enrich_blog_detail(
             # 投稿日時
             # -------------------------
 
-            original_date = blog.get(
-                "date",
-                ""
-            )
-
-
             detail_date = extract_detail_datetime(
                 soup,
                 html,
-                original_date
+                blog.get(
+                    "date",
+                    ""
+                )
             )
 
 
@@ -864,24 +1415,8 @@ async def enrich_blog_detail(
                 blog["date"] = detail_date
 
 
-            # 時刻取得状況をログ表示
-            if re.search(
-                r"\d{2}:\d{2}",
-                blog.get(
-                    "date",
-                    ""
-                )
-            ):
-
-                datetime_status = "時刻取得成功"
-
-            else:
-
-                datetime_status = "時刻なし"
-
-
             # -------------------------
-            # メンバー
+            # 詳細ページのメンバー欄
             # -------------------------
 
             member_tag = (
@@ -891,22 +1426,43 @@ async def enrich_blog_detail(
                 or soup.select_one(
                     ".bd--name"
                 )
+                or soup.select_one(
+                    ".blog-name"
+                )
             )
 
 
             if member_tag:
 
-                member = normalize_member_name(
-                    member_tag.get_text(
-                        " ",
-                        strip=True
+                detail_member = (
+                    normalize_member_name(
+                        member_tag.get_text(
+                            " ",
+                            strip=True
+                        )
                     )
                 )
 
 
-                if member:
+                if is_ignored_member(
+                    detail_member
+                ):
 
-                    blog["member"] = member
+                    blog["_ignore"] = True
+
+                    print(
+                        "乃木坂 運営スタッフ記事を除外:",
+                        url
+                    )
+
+                    return blog
+
+
+                if detail_member:
+
+                    blog["member"] = (
+                        detail_member
+                    )
 
 
             # -------------------------
@@ -916,6 +1472,9 @@ async def enrich_blog_detail(
             title_tag = (
                 soup.select_one(
                     ".bd--hd__ttl"
+                )
+                or soup.select_one(
+                    ".blog-title"
                 )
                 or soup.select_one(
                     "h1"
@@ -930,10 +1489,96 @@ async def enrich_blog_detail(
                     strip=True
                 )
 
-
                 if title:
 
                     blog["title"] = title
+
+
+            # -------------------------
+            # 本文
+            # -------------------------
+
+            body_tag = (
+                soup.select_one(
+                    ".bd--edit"
+                )
+                or soup.select_one(
+                    ".bd--body"
+                )
+                or soup.select_one(
+                    ".blog-article"
+                )
+                or soup.select_one(
+                    "article"
+                )
+                or soup.select_one(
+                    "main"
+                )
+            )
+
+
+            if body_tag:
+
+                blog["text"] = str(
+                    body_tag
+                )
+
+
+            # -------------------------
+            # 期別表記を個人名へ変換
+            # -------------------------
+
+            resolved_member = (
+                resolve_nogizaka_member(
+                    blog.get(
+                        "member",
+                        ""
+                    ),
+                    blog.get(
+                        "title",
+                        ""
+                    ),
+                    blog.get(
+                        "text",
+                        ""
+                    )
+                )
+            )
+
+
+            if not resolved_member:
+
+                blog["_ignore"] = True
+
+                return blog
+
+
+            blog["member"] = (
+                resolved_member
+            )
+
+
+            # -------------------------
+            # ログ
+            # -------------------------
+
+            if re.search(
+                r"\d{2}:\d{2}",
+                blog.get(
+                    "date",
+                    ""
+                )
+            ):
+
+                datetime_status = (
+                    "時刻取得成功"
+                )
+
+            else:
+
+                datetime_status = (
+                    "時刻なし"
+                )
 
 
             print(
@@ -956,7 +1601,7 @@ async def enrich_blog_detail(
 
 
         await asyncio.sleep(
-            DETAIL_DELAY
+            DETAIL_REQUEST_DELAY
         )
 
 
@@ -964,7 +1609,7 @@ async def enrich_blog_detail(
 
 
 # =========================
-# 全記事の詳細情報補完
+# 全詳細情報補完
 # =========================
 
 async def enrich_all_details(
@@ -1031,15 +1676,29 @@ async def enrich_all_details(
                 result
             )
 
-            enriched_blogs.append(
-                original_blog
-            )
+            if not original_blog.get(
+                "_ignore",
+                False
+            ):
 
-        else:
+                enriched_blogs.append(
+                    original_blog
+                )
 
-            enriched_blogs.append(
-                result
-            )
+            continue
+
+
+        if result.get(
+            "_ignore",
+            False
+        ):
+
+            continue
+
+
+        enriched_blogs.append(
+            result
+        )
 
 
     time_count = sum(
@@ -1071,238 +1730,209 @@ async def enrich_all_details(
 
 
 # =========================
-# ページング確認
-# =========================
-
-async def test_pagination(
-    session: aiohttp.ClientSession
-):
-
-    first_items, first_data = await fetch_api_items(
-        session
-    )
-
-
-    second_items, _ = await fetch_api_items(
-        session,
-        params={
-            "page": 2
-        }
-    )
-
-
-    first_urls = [
-        normalize_blog_url(
-            item.get(
-                "link",
-                ""
-            )
-        )
-        for item in first_items
-        if item.get(
-            "link"
-        )
-    ]
-
-
-    second_urls = [
-        normalize_blog_url(
-            item.get(
-                "link",
-                ""
-            )
-        )
-        for item in second_items
-        if item.get(
-            "link"
-        )
-    ]
-
-
-    print(
-        f"乃木坂 API1回目: "
-        f"{len(first_urls)}件"
-    )
-
-
-    print(
-        f"乃木坂 page=2指定: "
-        f"{len(second_urls)}件"
-    )
-
-
-    if first_urls:
-
-        print(
-            "乃木坂 1回目先頭:",
-            first_urls[0]
-        )
-
-        print(
-            "乃木坂 1回目末尾:",
-            first_urls[-1]
-        )
-
-
-    if second_urls:
-
-        print(
-            "乃木坂 page=2先頭:",
-            second_urls[0]
-        )
-
-        print(
-            "乃木坂 page=2末尾:",
-            second_urls[-1]
-        )
-
-
-    same_result = (
-        bool(first_urls)
-        and first_urls == second_urls
-    )
-
-
-    if same_result:
-
-        print(
-            "⚠️ 乃木坂APIはpage指定を無視して、"
-            "同じ一覧を返しています。"
-        )
-
-    else:
-
-        print(
-            "乃木坂APIのページ移動を確認できました。"
-        )
-
-
-    metadata_keys = [
-        key
-        for key in first_data.keys()
-        if key != "data"
-    ]
-
-
-    print(
-        "乃木坂APIメタ情報キー:",
-        metadata_keys
-    )
-
-
-    for key in metadata_keys:
-
-        value = first_data.get(
-            key
-        )
-
-
-        if isinstance(
-            value,
-            (
-                str,
-                int,
-                float,
-                bool,
-                type(None)
-            )
-        ):
-
-            print(
-                f"乃木坂API {key}: "
-                f"{value}"
-            )
-
-
-    return (
-        first_items,
-        second_items,
-        same_result
-    )
-
-
-# =========================
-# ブログ一覧取得
+# 全API記事取得
 # =========================
 
 async def get_all_blog_urls(
     session: aiohttp.ClientSession
 ) -> list[dict]:
 
-    (
-        first_items,
-        second_items,
-        same_result
-
-    ) = await test_pagination(
-        session
+    print(
+        "乃木坂 API page=1 から"
+        "最終ページまで巡回します。"
     )
-
-
-    # page=2が同一内容なら
-    # 最初の100件だけ使用する
-    if same_result:
-
-        source_items = first_items
-
-    else:
-
-        source_items = (
-            first_items
-            + second_items
-        )
 
 
     blogs = []
 
     seen_urls = set()
 
+    previous_page_urls = None
 
-    for item in source_items:
+    page = 1
 
-        blog = convert_item(
-            item
+
+    while page <= API_MAX_PAGE:
+
+        try:
+
+            items, data = await fetch_api_items(
+                session,
+                page=page
+            )
+
+        except asyncio.CancelledError:
+
+            raise
+
+        except Exception as e:
+
+            print(
+                f"乃木坂 API page={page} "
+                f"取得エラー:",
+                e
+            )
+
+            break
+
+
+        if not items:
+
+            print(
+                f"乃木坂 API page={page}: "
+                "記事0件のため巡回終了"
+            )
+
+            break
+
+
+        page_blogs = []
+
+
+        for item in items:
+
+            blog = convert_item(
+                item
+            )
+
+            if blog:
+
+                page_blogs.append(
+                    blog
+                )
+
+
+        page_urls = [
+            blog.get(
+                "url",
+                ""
+            )
+            for blog in page_blogs
+            if blog.get(
+                "url"
+            )
+        ]
+
+
+        # page指定が無視され、
+        # 前ページと同じ内容になった場合
+        if (
+            previous_page_urls is not None
+            and page_urls == previous_page_urls
+        ):
+
+            print(
+                f"乃木坂 API page={page}: "
+                "前ページと同じ内容のため"
+                "巡回終了"
+            )
+
+            break
+
+
+        previous_page_urls = page_urls
+
+
+        new_count = 0
+
+
+        for blog in page_blogs:
+
+            blog_url = blog.get(
+                "url",
+                ""
+            )
+
+            if not blog_url:
+                continue
+
+            if blog_url in seen_urls:
+                continue
+
+            seen_urls.add(
+                blog_url
+            )
+
+            blogs.append(
+                blog
+            )
+
+            new_count += 1
+
+
+        print(
+            f"乃木坂 API page={page}: "
+            f"{len(items)}件 / "
+            f"新規{new_count}件 / "
+            f"合計{len(blogs)}件"
         )
 
 
-        if not blog:
-            continue
+        if new_count == 0:
+
+            print(
+                f"乃木坂 API page={page}: "
+                "新しい記事URLがないため"
+                "巡回終了"
+            )
+
+            break
 
 
-        blog_url = blog.get(
-            "url",
-            ""
+        # APIが返す総件数が取得できる場合
+        total_count = data.get(
+            "count"
         )
 
 
-        if not blog_url:
-            continue
+        try:
+
+            total_count = int(
+                total_count
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            total_count = 0
 
 
-        if blog_url in seen_urls:
-            continue
+        if (
+            total_count > 0
+            and len(seen_urls) >= total_count
+        ):
+
+            print(
+                "乃木坂 API総件数へ"
+                "到達したため巡回終了:",
+                total_count
+            )
+
+            break
 
 
-        seen_urls.add(
-            blog_url
+        page += 1
+
+
+        await asyncio.sleep(
+            PAGE_REQUEST_DELAY
         )
 
 
-        blogs.append(
-            blog
+    else:
+
+        print(
+            "⚠️ 乃木坂 API安全上限へ"
+            "到達したため巡回終了:",
+            API_MAX_PAGE
         )
 
 
     print(
-        f"乃木坂 重複除去後: "
+        f"乃木坂 API一覧取得完了: "
         f"{len(blogs)}件"
-    )
-
-
-    # 詳細ページを開いて時刻を取得
-    blogs = await enrich_all_details(
-        session,
-        blogs
     )
 
 
@@ -1310,42 +1940,76 @@ async def get_all_blog_urls(
 
 
 # =========================
-# 日時ソート
+# 全記事取得
 # =========================
 
-def datetime_key(
-    blog: dict
-) -> datetime:
+async def get_all_blogs(
+    session: aiohttp.ClientSession
+) -> list[dict]:
 
-    date_text = blog.get(
-        "date",
-        ""
+    blogs = await get_all_blog_urls(
+        session
     )
 
 
-    formats = (
-        "%Y年%m月%d日 %H:%M",
-        "%Y年%m月%d日",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%d",
+    if not blogs:
+
+        return []
+
+
+    # APIの日付で古い順へ並べる
+    blogs.sort(
+        key=datetime_key
     )
 
 
-    for date_format in formats:
+    # -------------------------
+    # テスト中は詳細取得候補を絞る
+    # -------------------------
 
-        try:
+    if ARCHIVE_TEST_LIMIT > 0:
 
-            return datetime.strptime(
-                date_text,
-                date_format
-            )
-
-        except ValueError:
-
-            continue
+        candidate_limit = max(
+            ARCHIVE_TEST_LIMIT + 24,
+            ARCHIVE_TEST_LIMIT * 2
+        )
 
 
-    return datetime.max
+        before_count = len(
+            blogs
+        )
+
+
+        blogs = blogs[
+            :candidate_limit
+        ]
+
+
+        print(
+            "乃木坂 詳細取得候補制限:",
+            f"{before_count}件 → "
+            f"{len(blogs)}件"
+        )
+
+
+    print(
+        f"乃木坂 詳細取得対象: "
+        f"{len(blogs)}件"
+    )
+
+
+    blogs = await enrich_all_details(
+        session,
+        blogs
+    )
+
+
+    blogs.sort(
+        key=datetime_key
+    )
+
+
+    return blogs
 
 
 # =========================
@@ -1356,7 +2020,7 @@ async def get_oldest_first(
     session: aiohttp.ClientSession
 ) -> list[dict]:
 
-    blogs = await get_all_blog_urls(
+    blogs = await get_all_blogs(
         session
     )
 
@@ -1375,6 +2039,10 @@ async def get_oldest_first(
                 ""
             ),
             blogs[0].get(
+                "member",
+                ""
+            ),
+            blogs[0].get(
                 "url",
                 ""
             )
@@ -1388,10 +2056,20 @@ async def get_oldest_first(
                 ""
             ),
             blogs[-1].get(
+                "member",
+                ""
+            ),
+            blogs[-1].get(
                 "url",
                 ""
             )
         )
+
+
+    print(
+        f"乃木坂 最終取得: "
+        f"{len(blogs)}件"
+    )
 
 
     return blogs
