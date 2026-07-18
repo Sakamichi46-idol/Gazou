@@ -58,7 +58,7 @@ async def latest(ctx):
 
         for blog in blogs:
             await ctx.send(
-                (
+                ( 
                     f"🏷️ {blog.get('group', '')}\n"
                     f"👤 {blog.get('member', '')}\n"
                     f"📝 {blog.get('title', '')}\n"
