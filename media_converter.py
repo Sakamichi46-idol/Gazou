@@ -505,7 +505,7 @@ async def send_blog_media(
 
 
     failed_images = []
-    text_sent = False
+    attachments = []
 
 
     async with aiohttp.ClientSession() as session:
@@ -541,21 +541,45 @@ async def send_blog_media(
                 continue
 
 
-            # 1ファイルずつ送ることで
-            # リクエスト全体の容量超過を防ぐ
-            await channel.send(
-                content=(
-                    text
-                    if not text_sent
-                    else None
-                ),
-                file=file,
-                suppress_embeds=True
+            attachments.append(
+                file
             )
 
 
-            text_sent = True
+    # Discordでは1メッセージにつき最大10ファイル
+    # 10枚ごとに分けて、まとめて送信する
+    text_sent = False
 
+
+    for start_index in range(
+        0,
+        len(attachments),
+        10
+    ):
+
+        file_group = attachments[
+            start_index:start_index + 10
+        ]
+
+
+        await channel.send(
+            content=(
+                text
+                if not text_sent
+                else None
+            ),
+            files=file_group,
+            suppress_embeds=True
+        )
+
+
+        text_sent = True
+
+
+        if (
+            send_delay > 0
+            and start_index + 10 < len(attachments)
+        ):
 
             await asyncio.sleep(
                 send_delay
@@ -611,6 +635,8 @@ async def send_blog_media(
             )
 
 
-            await asyncio.sleep(
-                send_delay
-            )
+            if failed_text and send_delay > 0:
+
+                await asyncio.sleep(
+                    send_delay
+                )
