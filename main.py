@@ -1,10 +1,8 @@
 import os
 import re
-import io
+import asyncio
 
-import aiohttp
 import discord
-
 from discord.ext import commands
 
 from image_getter import get_images
@@ -12,18 +10,29 @@ from blog_checker import get_latest_blog
 from blog_monitor import check_blog
 from database import init_db
 
+from media_converter import (
+    send_blog_media
+)
 
+
+# =========================
+# Discord設定
+# =========================
 
 TOKEN = os.getenv(
     "TOKEN"
 )
 
 
+if not TOKEN:
+
+    raise RuntimeError(
+        "環境変数 TOKEN が設定されていません。"
+    )
+
 
 intents = discord.Intents.default()
-
 intents.message_content = True
-
 
 
 bot = commands.Bot(
@@ -32,17 +41,25 @@ bot = commands.Bot(
 )
 
 
+# =========================
+# URL判定
+# =========================
 
 url_pattern = re.compile(
-    r"https?://\S+"
+    r"https?://[^\s<>]+"
 )
 
 
+# =========================
+# ブログ監視タスク
+# =========================
 
 blog_task = None
 
 
-
+# =========================
+# 起動時処理
+# =========================
 
 @bot.event
 async def on_ready():
@@ -58,10 +75,12 @@ async def on_ready():
     )
 
 
+    if (
+        blog_task is None
+        or blog_task.done()
+    ):
 
-    if blog_task is None:
-
-        blog_task = bot.loop.create_task(
+        blog_task = asyncio.create_task(
             check_blog(bot)
         )
 
@@ -71,7 +90,9 @@ async def on_ready():
         )
 
 
-
+# =========================
+# Ping
+# =========================
 
 @bot.command()
 async def ping(ctx):
@@ -81,40 +102,57 @@ async def ping(ctx):
     )
 
 
-
+# =========================
+# 最新ブログ確認
+# =========================
 
 @bot.command()
 async def latest(ctx):
 
-    blogs = get_latest_blog()
+    try:
+
+        blogs = get_latest_blog()
 
 
+        if not blogs:
 
-    if not blogs:
+            await ctx.send(
+                "ブログ取得失敗"
+            )
 
-        await ctx.send(
-            "ブログ取得失敗"
+            return
+
+
+        for blog in blogs:
+
+            await ctx.send(
+                (
+                    f"🏷️ {blog.get('group', '')}\n"
+                    f"👤 {blog.get('member', '')}\n"
+                    f"📝 {blog.get('title', '')}\n"
+                    f"📅 {blog.get('date', '')}\n"
+                    f"🔗 {blog.get('url', '')}"
+                ),
+                suppress_embeds=True
+            )
+
+
+    except Exception as error:
+
+        print(
+            "最新ブログ取得エラー:",
+            error
         )
 
-        return
-
-
-
-    for blog in blogs:
 
         await ctx.send(
-            (
-                f"🏷️ {blog.get('group','')}\n"
-                f"👤 {blog.get('member','')}\n"
-                f"📝 {blog.get('title','')}\n"
-                f"📅 {blog.get('date','')}\n"
-                f"🔗 {blog.get('url','')}"
-            ),
-            suppress_embeds=True
+            f"ブログ取得エラー: {error}"
         )
 
 
-
+# =========================
+# メッセージ受信
+# =========================
 
 @bot.event
 async def on_message(message):
@@ -124,27 +162,46 @@ async def on_message(message):
         return
 
 
-
     urls = url_pattern.findall(
         message.content
     )
 
 
+    for raw_url in urls:
 
-    for url in urls:
+        # 文末の句読点などを除去
+        url = raw_url.rstrip(
+            ".,!?、。！？)]}〉》」』"
+        )
+
 
         try:
 
-            blog = get_images(
+            # get_imagesは同期関数なので
+            # 別スレッドで実行
+            blog = await asyncio.to_thread(
+                get_images,
                 url
             )
+
+
+            if not isinstance(
+                blog,
+                dict
+            ):
+
+                await message.channel.send(
+                    "ブログ情報を取得できませんでした。",
+                    suppress_embeds=True
+                )
+
+                continue
 
 
             images = blog.get(
                 "images",
                 []
             )
-
 
 
             if not images:
@@ -157,105 +214,37 @@ async def on_message(message):
                 continue
 
 
-
-
             text = (
-                f"🏷️ {blog.get('group','')}\n"
-                f"👤 {blog.get('member','')}\n"
-                f"📝 {blog.get('title','')}\n"
-                f"📅 {blog.get('date','')}\n"
-                f"🔗 {blog.get('url','')}\n\n"
-                f"📷 ブログ画像 ({len(images)}枚)"
+                f"🏷️ {blog.get('group', '')}\n"
+                f"👤 {blog.get('member', '')}\n"
+                f"📝 {blog.get('title', '')}\n"
+                f"📅 {blog.get('date', '')}\n"
+                f"🔗 {blog.get('url', url)}\n\n"
+                f"📷 ブログ画像 "
+                f"({len(images)}枚)"
             )
 
 
-
-            async with aiohttp.ClientSession() as session:
-
-                files = []
-
-
-                for i, image_url in enumerate(
-                    images,
-                    start=1
-                ):
-
-                    try:
-
-                        async with session.get(
-                            image_url,
-                            timeout=15
-                        ) as resp:
+            await send_blog_media(
+                channel=message.channel,
+                text=text,
+                image_urls=images,
+                send_delay=1.0
+            )
 
 
-                            if resp.status != 200:
-
-                                continue
-
-
-
-                            data = await resp.read()
-
-
-                            files.append(
-                                discord.File(
-                                    io.BytesIO(data),
-                                    filename=f"image{i}.jpg"
-                                )
-                            )
-
-
-                    except Exception as e:
-
-                        print(
-                            "画像取得エラー:",
-                            e
-                        )
-
-
-
-                if not files:
-
-                    await message.channel.send(
-                        "画像を取得できませんでした。",
-                        suppress_embeds=True
-                    )
-
-                    continue
-
-
-
-                for start in range(
-                    0,
-                    len(files),
-                    10
-                ):
-
-                    await message.channel.send(
-                        content=text,
-                        files=files[start:start+10],
-                        suppress_embeds=True
-                    )
-
-
-                    text = ""
-
-
-
-        except Exception as e:
+        except Exception as error:
 
             print(
                 "画像処理エラー:",
-                e
+                error
             )
-
 
 
             await message.channel.send(
-                f"エラー: {e}",
+                f"エラー: {error}",
                 suppress_embeds=True
             )
-
 
 
     await bot.process_commands(
@@ -263,7 +252,9 @@ async def on_message(message):
     )
 
 
-
+# =========================
+# Bot起動
+# =========================
 
 bot.run(
     TOKEN
