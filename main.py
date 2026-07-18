@@ -1,130 +1,62 @@
+import asyncio
 import os
 import re
-import asyncio
 
 import discord
 from discord.ext import commands
 
-from image_getter import get_images
 from blog_checker import get_latest_blog
 from blog_monitor import check_blog
 from database import init_db
-
-from media_converter import (
-    send_blog_media
-)
+from image_getter import get_images
+from media_converter import send_blog_media
 
 
-# =========================
-# Discord設定
-# =========================
-
-TOKEN = os.getenv(
-    "TOKEN"
-)
-
+TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
-
-    raise RuntimeError(
-        "環境変数 TOKEN が設定されていません。"
-    )
+    raise RuntimeError("環境変数 TOKEN が設定されていません。")
 
 
 intents = discord.Intents.default()
 intents.message_content = True
 
-
 bot = commands.Bot(
     command_prefix="!",
-    intents=intents
+    intents=intents,
 )
 
-
-# =========================
-# URL判定
-# =========================
-
-url_pattern = re.compile(
-    r"https?://[^\s<>]+"
-)
-
-
-# =========================
-# ブログ監視タスク
-# =========================
-
+url_pattern = re.compile(r"https?://[^\s<>]+")
 blog_task = None
 
 
-# =========================
-# 起動時処理
-# =========================
-
 @bot.event
 async def on_ready():
-
     global blog_task
 
-
     init_db()
+    print(f"{bot.user} が起動しました！")
 
+    if blog_task is None or blog_task.done():
+        blog_task = asyncio.create_task(check_blog(bot))
+        print("ブログ監視開始")
 
-    print(
-        f"{bot.user} が起動しました！"
-    )
-
-
-    if (
-        blog_task is None
-        or blog_task.done()
-    ):
-
-        blog_task = asyncio.create_task(
-            check_blog(bot)
-        )
-
-
-        print(
-            "ブログ監視開始"
-        )
-
-
-# =========================
-# Ping
-# =========================
 
 @bot.command()
 async def ping(ctx):
+    await ctx.send("Pong!")
 
-    await ctx.send(
-        "Pong!"
-    )
-
-
-# =========================
-# 最新ブログ確認
-# =========================
 
 @bot.command()
 async def latest(ctx):
-
     try:
-
-        blogs = get_latest_blog()
-
+        blogs = await asyncio.to_thread(get_latest_blog)
 
         if not blogs:
-
-            await ctx.send(
-                "ブログ取得失敗"
-            )
-
+            await ctx.send("ブログ取得失敗")
             return
 
-
         for blog in blogs:
-
             await ctx.send(
                 (
                     f"🏷️ {blog.get('group', '')}\n"
@@ -133,86 +65,42 @@ async def latest(ctx):
                     f"📅 {blog.get('date', '')}\n"
                     f"🔗 {blog.get('url', '')}"
                 ),
-                suppress_embeds=True
+                suppress_embeds=True,
             )
 
-
     except Exception as error:
+        print("最新ブログ取得エラー:", error)
+        await ctx.send(f"ブログ取得エラー: {error}")
 
-        print(
-            "最新ブログ取得エラー:",
-            error
-        )
-
-
-        await ctx.send(
-            f"ブログ取得エラー: {error}"
-        )
-
-
-# =========================
-# メッセージ受信
-# =========================
 
 @bot.event
 async def on_message(message):
-
     if message.author.bot:
-
         return
 
-
-    urls = url_pattern.findall(
-        message.content
-    )
-
+    urls = url_pattern.findall(message.content)
 
     for raw_url in urls:
-
-        # 文末の句読点などを除去
-        url = raw_url.rstrip(
-            ".,!?、。！？)]}〉》」』"
-        )
-
+        url = raw_url.rstrip(".,!?、。！？)]}〉》」』")
 
         try:
+            blog = await asyncio.to_thread(get_images, url)
 
-            # get_imagesは同期関数なので
-            # 別スレッドで実行
-            blog = await asyncio.to_thread(
-                get_images,
-                url
-            )
-
-
-            if not isinstance(
-                blog,
-                dict
-            ):
-
+            if not isinstance(blog, dict):
                 await message.channel.send(
                     "ブログ情報を取得できませんでした。",
-                    suppress_embeds=True
+                    suppress_embeds=True,
                 )
-
                 continue
 
-
-            images = blog.get(
-                "images",
-                []
-            )
-
+            images = blog.get("images", [])
 
             if not images:
-
                 await message.channel.send(
                     "画像が見つかりませんでした。",
-                    suppress_embeds=True
+                    suppress_embeds=True,
                 )
-
                 continue
-
 
             text = (
                 f"🏷️ {blog.get('group', '')}\n"
@@ -220,42 +108,24 @@ async def on_message(message):
                 f"📝 {blog.get('title', '')}\n"
                 f"📅 {blog.get('date', '')}\n"
                 f"🔗 {blog.get('url', url)}\n\n"
-                f"📷 ブログ画像 "
-                f"({len(images)}枚)"
+                f"📷 ブログ画像 ({len(images)}枚)"
             )
-
 
             await send_blog_media(
                 channel=message.channel,
                 text=text,
                 image_urls=images,
-                send_delay=1.0
+                send_delay=1.0,
             )
-
 
         except Exception as error:
-
-            print(
-                "画像処理エラー:",
-                error
-            )
-
-
+            print("画像処理エラー:", error)
             await message.channel.send(
                 f"エラー: {error}",
-                suppress_embeds=True
+                suppress_embeds=True,
             )
 
-
-    await bot.process_commands(
-        message
-    )
+    await bot.process_commands(message)
 
 
-# =========================
-# Bot起動
-# =========================
-
-bot.run(
-    TOKEN
-)
+bot.run(TOKEN)
