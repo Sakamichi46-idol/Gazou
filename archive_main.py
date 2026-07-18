@@ -802,9 +802,9 @@ async def archive_loop():
                         if image_urls:
 
                             failed_urls = []
+                            attachments = []
 
-                            # 413対策として、添付は1件ずつ送信する。
-                            # 複数ファイルの合計容量やmultipartの増加を避けられる。
+                            # 画像を取得し、Discordへ送れる添付を準備する。
                             for image_index, image_url in enumerate(
                                 image_urls,
                                 start=1
@@ -837,17 +837,66 @@ async def archive_loop():
                                     failed_urls.append(image_url)
                                     continue
 
+                                attachments.append({
+                                    "file": file,
+                                    "size": attachment.get("size", 0),
+                                    "url": image_url,
+                                })
+
+                            # Discordは1メッセージにつき最大10ファイル。
+                            # さらに合計容量が大きくなりすぎないよう、
+                            # アップロード上限以内でグループ分けする。
+                            file_groups = []
+                            current_group = []
+                            current_size = 0
+                            group_size_limit = max(
+                                upload_limit - (512 * 1024),
+                                1 * 1024 * 1024
+                            )
+
+                            for attachment in attachments:
+                                attachment_size = attachment["size"]
+
+                                should_split = (
+                                    len(current_group) >= 10
+                                    or (
+                                        current_group
+                                        and current_size + attachment_size
+                                        > group_size_limit
+                                    )
+                                )
+
+                                if should_split:
+                                    file_groups.append(current_group)
+                                    current_group = []
+                                    current_size = 0
+
+                                current_group.append(attachment)
+                                current_size += attachment_size
+
+                            if current_group:
+                                file_groups.append(current_group)
+
+                            # グループごとにまとめて送信する。
+                            for file_group in file_groups:
                                 try:
-                                    await channel.send(file=file)
+                                    await channel.send(
+                                        files=[
+                                            item["file"]
+                                            for item in file_group
+                                        ]
+                                    )
                                     await asyncio.sleep(SEND_DELAY)
                                 except Exception as send_error:
                                     print(
-                                        f"添付送信エラー "
-                                        f"channel={channel.id} "
-                                        f"url={image_url}:",
+                                        f"添付まとめ送信エラー "
+                                        f"channel={channel.id}:",
                                         send_error
                                     )
-                                    failed_urls.append(image_url)
+                                    failed_urls.extend(
+                                        item["url"]
+                                        for item in file_group
+                                    )
 
                             # 変換後も送れなかったものは元画像URLを投稿
                             if failed_urls:
