@@ -5,6 +5,4 @@ requests
 beautifulsoup4
 aiohttp
 lxml
-imageio
 imageio-ffmpeg
-Pillow
