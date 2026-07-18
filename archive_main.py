@@ -9,7 +9,8 @@ from discord.ext import commands, tasks
 from archive_checker import get_archive_targets
 from archive_database import (
     init_archive_db,
-    save_archive
+    save_archive,
+    reset_archive,
 )
 from archive_image_getter import get_images
 from archive_config import (
@@ -495,66 +496,44 @@ async def archive_stop(ctx):
 @commands.is_owner()
 async def archive_reset(ctx):
 
-    # 巡回中なら、先に停止
+    # 巡回中なら先に停止
     was_running = archive_loop.is_running()
 
-
     if was_running:
-
         archive_loop.cancel()
 
+        # タスクが停止するまで少し待つ
+        await asyncio.sleep(1)
 
     try:
-
-        if os.path.exists("data"):
-
-            shutil.rmtree(
-                "data"
-            )
-
-
-        os.makedirs(
-            "data",
-            exist_ok=True
-        )
-
-
-        init_archive_db()
-
+        reset_archive()
 
         await ctx.send(
-            "🧹 アーカイブDBをリセットしました。"
+            "🧹 アーカイブDBをリセットしました。\n"
+            "これまで送信済みだった記事も、再び送信対象になります。"
         )
-
 
         print(
             "アーカイブDBをリセットしました。"
         )
 
-
-    except Exception as e:
-
+    except Exception as error:
         print(
             "アーカイブDBリセットエラー:",
-            e
+            error,
         )
-
 
         await ctx.send(
-            f"⚠️ DBリセットに失敗しました。\n`{e}`"
+            f"⚠️ DBリセットに失敗しました。\n`{error}`"
         )
-
 
     # リセット前に動作中だった場合だけ再開
     if was_running:
-
         archive_loop.start()
-
 
         await ctx.send(
             "▶️ アーカイブ巡回を再開しました。"
         )
-
 
 # =========================
 # DB件数確認
