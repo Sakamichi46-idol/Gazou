@@ -1,5 +1,4 @@
 import os
-import io
 import shutil
 import asyncio
 import aiohttp
@@ -16,6 +15,14 @@ from archive_image_getter import get_images
 from archive_config import (
     ARCHIVE_INTERVAL,
     SEND_DELAY
+)
+
+from archive_media import (
+    download_attachment
+)
+
+from archive_parsers.utils import (
+    normalize_member_name
 )
 
 from archive_parsers.utils import (
@@ -397,45 +404,7 @@ def get_channels(blog):
 
     return channels
 
-# =========================
-# 画像ダウンロード
-# =========================
 
-async def download_image(
-    session,
-    url,
-    index
-):
-
-    try:
-
-        timeout = aiohttp.ClientTimeout(
-            total=20
-        )
-
-        async with session.get(
-            url,
-            timeout=timeout
-        ) as response:
-
-            if response.status != 200:
-                return None
-
-            data = await response.read()
-
-            return discord.File(
-                io.BytesIO(data),
-                filename=f"image_{index}.jpg"
-            )
-
-    except Exception as e:
-
-        print(
-            "画像取得エラー:",
-            e
-        )
-
-        return None
 
 
 # =========================
@@ -818,11 +787,27 @@ async def archive_loop():
                         )
 
 
-                        # Discordの添付上限に合わせ、
-                        # 10枚ずつ送信する
+                        # Discordの添付上限を取得
+                        if channel.guild:
+
+                            upload_limit = (
+                                channel.guild.filesize_limit
+                            )
+
+                        else:
+
+                            # ギルド情報を取れなかった場合の
+                            # 安全側の予備値
+                            upload_limit = (
+                                8 * 1024 * 1024
+                            )
+
+
                         if image_urls:
 
                             files = []
+                            batch_size = 0
+                            failed_urls = []
 
 
                             for image_index, image_url in enumerate(
@@ -830,50 +815,147 @@ async def archive_loop():
                                 start=1
                             ):
 
-                                file = await download_image(
+                                attachment = await download_attachment(
 
                                     session,
 
                                     image_url,
 
-                                    image_index
+                                    image_index,
+
+                                    upload_limit
 
                                 )
 
 
-                                if file:
+                                if not attachment:
 
-                                    files.append(
-                                        file
+                                    failed_urls.append(
+                                        image_url
                                     )
 
+                                    continue
 
-                                if len(files) == 10:
+
+                                file = attachment.get(
+                                    "file"
+                                )
+
+                                file_size = attachment.get(
+                                    "size",
+                                    0
+                                )
+
+
+                                if not file:
+
+                                    reason = attachment.get(
+                                        "reason",
+                                        "送信できませんでした。"
+                                    )
+
+                                    print(
+                                        f"画像送信対象外: "
+                                        f"{reason} "
+                                        f"{image_url}"
+                                    )
+
+                                    failed_urls.append(
+                                        image_url
+                                    )
+
+                                    continue
+
+
+                                # 10件を超える場合、または
+                                # バッチ全体が容量上限に
+                                # 近づく場合は先に送信
+                                if (
+                                    files
+                                    and (
+                                        len(files) >= 10
+                                        or (
+                                            batch_size
+                                            + file_size
+                                            > upload_limit
+                                            - 512 * 1024
+                                        )
+                                    )
+                                ):
 
                                     await channel.send(
                                         files=files
                                     )
 
-
                                     files = []
-
+                                    batch_size = 0
 
                                     await asyncio.sleep(
                                         SEND_DELAY
                                     )
 
 
-                            # 10枚未満の残りを送信
+                                files.append(
+                                    file
+                                )
+
+                                batch_size += (
+                                    file_size
+                                )
+
+
+                            # 残った添付ファイルを送信
                             if files:
 
                                 await channel.send(
                                     files=files
                                 )
 
-
                                 await asyncio.sleep(
                                     SEND_DELAY
                                 )
+
+
+                            # 変換後も送れなかったものは
+                            # 元画像URLを記録として投稿
+                            if failed_urls:
+
+                                url_messages = []
+
+                                for failed_url in failed_urls:
+
+                                    url_messages.append(
+                                        f"・{failed_url}"
+                                    )
+
+
+                                failed_text = (
+                                    "⚠️ 容量または変換エラーのため、"
+                                    "添付できなかった画像です。\n"
+                                    + "\n".join(
+                                        url_messages
+                                    )
+                                )
+
+
+                                # Discordの文字数上限対策
+                                while failed_text:
+
+                                    message_part = failed_text[
+                                        :1900
+                                    ]
+
+                                    failed_text = failed_text[
+                                        1900:
+                                    ]
+
+                                    await channel.send(
+                                        message_part
+                                    )
+
+                                    await asyncio.sleep(
+                                        SEND_DELAY
+                                    )
 
 
                     except Exception as e:
