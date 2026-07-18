@@ -12,17 +12,20 @@ CHECK_INTERVAL = 600
 
 def build_notification_text(blog, image_count):
     return (
-        f"๐ท๏ธ {blog.get('group', '')}\n"
-        f"๐ค {blog.get('member', '')}\n"
-        f"๐ {blog.get('title', '')}\n"
-        f"๐ {blog.get('date', '')}\n"
-        f"๐ {blog.get('url', '')}\n\n"
-        f"๐ท ใใญใฐ็ปๅ ({image_count}ๆ)"
+        f"🏷️ {blog.get('group', '')}\n"
+        f"👤 {blog.get('member', '')}\n"
+        f"📝 {blog.get('title', '')}\n"
+        f"📅 {blog.get('date', '')}\n"
+        f"🔗 {blog.get('url', '')}\n\n"
+        f"📷 ブログ画像 ({image_count}枚)"
     )
 
 
 async def notify_channel(channel, blog, images):
-    text = build_notification_text(blog, len(images))
+    text = build_notification_text(
+        blog,
+        len(images),
+    )
 
     await send_blog_media(
         channel=channel,
@@ -35,83 +38,183 @@ async def notify_channel(channel, blog, images):
 async def check_blog(bot):
     while not bot.is_closed():
         try:
-            blogs = await asyncio.to_thread(get_latest_blog)
-            print("็ฃ่ฆๅๅพ:", len(blogs), "ไปถ")
+            blogs = await asyncio.to_thread(
+                get_latest_blog
+            )
+
+            print(
+                "新着取得:",
+                len(blogs),
+                "件",
+            )
 
             for blog in blogs:
                 if not isinstance(blog, dict):
-                    print("ไธๆญฃใใผใฟ:", blog)
+                    print(
+                        "不正データ:",
+                        blog,
+                    )
                     continue
 
                 url = blog.get("url")
+
                 if not url:
                     continue
 
                 if is_notified(url):
-                    print("้็ฅๆธใฟ:", url)
+                    print(
+                        "通知済み:",
+                        url,
+                    )
                     continue
 
-                group = blog.get("group", "")
-                channel_ids = list(BLOG_CHANNELS.get(group, []))
+                group = blog.get(
+                    "group",
+                    "",
+                )
+
+                channel_ids = list(
+                    BLOG_CHANNELS.get(
+                        group,
+                        [],
+                    )
+                )
 
                 if ALL_BLOG_CHANNEL:
-                    channel_ids.append(ALL_BLOG_CHANNEL)
+                    channel_ids.append(
+                        ALL_BLOG_CHANNEL
+                    )
 
-                # ๅใIDใ้่คใใฆใใฆใ1ๅใ ใ้็ฅใใ
-                channel_ids = list(dict.fromkeys(channel_ids))
+                # 同じチャンネルIDが重複していても
+                # 1回だけ通知する
+                channel_ids = list(
+                    dict.fromkeys(
+                        channel_ids
+                    )
+                )
 
                 if not channel_ids:
-                    print("้็ฅๅใชใ:", group)
+                    print(
+                        "通知先なし:",
+                        group,
+                    )
                     continue
 
-                detail = await asyncio.to_thread(get_images, url)
+                detail = await asyncio.to_thread(
+                    get_images,
+                    url,
+                )
+
                 images = (
-                    detail.get("images", [])
-                    if isinstance(detail, dict)
+                    detail.get(
+                        "images",
+                        [],
+                    )
+                    if isinstance(
+                        detail,
+                        dict,
+                    )
                     else []
                 )
 
-                print("็ปๅๅๅพ:", len(images), "ๆ")
+                print(
+                    "画像取得:",
+                    len(images),
+                    "枚",
+                )
 
                 all_succeeded = True
                 notified_count = 0
 
                 for channel_id in channel_ids:
-                    channel = bot.get_channel(channel_id)
+                    channel = bot.get_channel(
+                        channel_id
+                    )
 
                     if not channel:
-                        print("ใใฃใณใใซๅๅพๅคฑๆ:", channel_id)
+                        print(
+                            "チャンネル取得失敗:",
+                            channel_id,
+                        )
+
                         all_succeeded = False
                         continue
 
                     try:
-                        await notify_channel(channel, blog, images)
+                        await notify_channel(
+                            channel,
+                            blog,
+                            images,
+                        )
+
                         notified_count += 1
-                        print("้็ฅๅฎไบ:", channel_id)
+
+                        print(
+                            "通知完了:",
+                            channel_id,
+                        )
+
                     except Exception as error:
                         all_succeeded = False
+
                         print(
-                            f"้็ฅใจใฉใผ channel={channel_id} url={url}:",
+                            (
+                                "通知エラー "
+                                f"channel={channel_id} "
+                                f"url={url}:"
+                            ),
                             error,
                         )
 
-                # ๅฐใชใใจใ1ใๆใธ้็ฅใงใใๅจ้็ฅๅใๆๅใใๅ ดๅใ ใไฟๅญ
-                if notified_count > 0 and all_succeeded:
+                # 少なくとも1か所へ通知でき、
+                # 全通知先が成功した場合だけ保存
+                if (
+                    notified_count > 0
+                    and all_succeeded
+                ):
                     save_blog(
                         url,
                         group,
-                        blog.get("member", ""),
-                        blog.get("title", ""),
-                        blog.get("date", ""),
+                        blog.get(
+                            "member",
+                            "",
+                        ),
+                        blog.get(
+                            "title",
+                            "",
+                        ),
+                        blog.get(
+                            "date",
+                            "",
+                        ),
                     )
-                    print("้็ฅๆธใฟDBไฟๅญ:", url)
+
+                    print(
+                        "通知済みDB保存:",
+                        url,
+                    )
+
                 else:
-                    print("้็ฅใซๅคฑๆใใใใDBไฟๅญใ่ฆ้ใใพใ:", url)
+                    print(
+                        (
+                            "通知に失敗したため"
+                            "DB保存を見送ります:"
+                        ),
+                        url,
+                    )
 
         except asyncio.CancelledError:
-            print("ใใญใฐ็ฃ่ฆใฟในใฏใ็ตไบใใพใใ")
+            print(
+                "ブログ監視タスクを終了します。"
+            )
             raise
-        except Exception as error:
-            print("ใใญใฐ็ฃ่ฆใจใฉใผ:", error)
 
-        await asyncio.sleep(CHECK_INTERVAL)
+        except Exception as error:
+            print(
+                "ブログ監視エラー:",
+                error,
+            )
+
+        await asyncio.sleep(
+            CHECK_INTERVAL
+        )
