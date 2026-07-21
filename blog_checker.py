@@ -1,9 +1,15 @@
-import requests
 import json
 import re
+from urllib.parse import (
+    parse_qsl,
+    urlencode,
+    urljoin,
+    urlsplit,
+    urlunsplit,
+)
 
+import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 
 from parsers.utils import normalize_datetime
 
@@ -19,100 +25,224 @@ HEADERS = {
     "Accept-Language": "ja-JP,ja;q=0.9",
 }
 
+REQUEST_TIMEOUT = 15
+
+# 1回の巡回で各グループから確認する最大件数
+MAX_POSTS_PER_GROUP = 20
+
+
+# =========================
+# 共通処理
+# =========================
+
+def clean_text(value):
+    if not value:
+        return ""
+
+    return re.sub(
+        r"\s+",
+        " ",
+        str(value),
+    ).strip()
+
+
+def canonicalize_url(url):
+    """
+    ima=xxxx のようにアクセスごとに変わる
+    パラメータを削除して、同じ記事を同一URLとして扱う。
+    """
+
+    if not url:
+        return ""
+
+    parts = urlsplit(url)
+
+    query = [
+        (key, value)
+        for key, value in parse_qsl(
+            parts.query,
+            keep_blank_values=True,
+        )
+        if key.lower() not in {
+            "ima",
+        }
+    ]
+
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query),
+            "",
+        )
+    )
+
+
+def get_text_from_selectors(
+    element,
+    selectors,
+):
+    for selector in selectors:
+        tag = element.select_one(selector)
+
+        if tag:
+            text = clean_text(
+                tag.get_text(
+                    " ",
+                    strip=True,
+                )
+            )
+
+            if text:
+                return text
+
+    return ""
+
+
+def remove_duplicate_blogs(blogs):
+    results = []
+    seen_urls = set()
+
+    for blog in blogs:
+        if not isinstance(blog, dict):
+            continue
+
+        url = canonicalize_url(
+            blog.get("url", "")
+        )
+
+        if not url:
+            continue
+
+        if url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+        blog["url"] = url
+        results.append(blog)
+
+    return results
+
 
 # =========================
 # 乃木坂46
 # =========================
 
 def get_nogizaka_latest():
-
-    url = (
+    api_url = (
         "https://www.nogizaka46.com"
         "/s/n46/api/list/blog"
     )
 
     try:
-
         response = requests.get(
-            url,
+            api_url,
             headers=HEADERS,
-            timeout=10
+            timeout=REQUEST_TIMEOUT,
         )
 
         print(
             "乃木坂 API STATUS:",
-            response.status_code
+            response.status_code,
         )
 
         response.raise_for_status()
 
         match = re.search(
-            r"res\((.*)\)",
-            response.text
+            r"res\((.*)\)\s*;?\s*$",
+            response.text,
+            flags=re.DOTALL,
         )
 
         if not match:
             print("乃木坂API解析失敗")
-            return None
+            return []
 
         data = json.loads(
             match.group(1)
         )
 
-        if not data.get("data"):
-            return None
-
-        blog = data["data"][0]
-
-        result = {
-
-            "group": "乃木坂46",
-
-            "url": blog.get(
-                "link",
-                ""
-            ),
-
-            "member": blog.get(
-                "name",
-                ""
-            ),
-
-            "title": blog.get(
-                "title",
-                ""
-            ),
-
-            "date": normalize_datetime(
-                blog.get(
-                    "date",
-                    ""
-                )
-            ),
-
-            "text": blog.get(
-                "text",
-                ""
-            )
-        }
-
-        print(
-            "乃木坂取得:",
-            result
+        posts = data.get(
+            "data",
+            [],
         )
 
-        return result
+        if not isinstance(posts, list):
+            print(
+                "乃木坂APIのdataが"
+                "リストではありません。"
+            )
+            return []
 
+        results = []
 
-    except Exception as e:
+        for post in posts[
+            :MAX_POSTS_PER_GROUP
+        ]:
+            if not isinstance(post, dict):
+                continue
 
+            blog_url = canonicalize_url(
+                urljoin(
+                    "https://www.nogizaka46.com",
+                    post.get("link", ""),
+                )
+            )
+
+            if not blog_url:
+                continue
+
+            results.append(
+                {
+                    "group": "乃木坂46",
+                    "url": blog_url,
+                    "member": clean_text(
+                        post.get(
+                            "name",
+                            "",
+                        )
+                    ),
+                    "title": clean_text(
+                        post.get(
+                            "title",
+                            "",
+                        )
+                    ),
+                    "date": normalize_datetime(
+                        post.get(
+                            "date",
+                            "",
+                        )
+                    ),
+                    "text": post.get(
+                        "text",
+                        "",
+                    ),
+                }
+            )
+
+        results = remove_duplicate_blogs(
+            results
+        )
+
+        print(
+            "乃木坂取得件数:",
+            len(results),
+        )
+
+        # 一覧は新しい順なので、
+        # 古い記事から通知する順番に変える
+        return list(
+            reversed(results)
+        )
+
+    except Exception as error:
         print(
             "乃木坂取得エラー:",
-            e
+            error,
         )
-
-        return None
-
+        return []
 
 
 # =========================
@@ -120,152 +250,120 @@ def get_nogizaka_latest():
 # =========================
 
 def get_sakurazaka_latest():
-
     list_url = (
         "https://sakurazaka46.com"
         "/s/s46/diary/blog/list"
     )
 
     try:
-
         response = requests.get(
             list_url,
             headers=HEADERS,
-            timeout=10
+            timeout=REQUEST_TIMEOUT,
         )
 
         response.raise_for_status()
 
-
         soup = BeautifulSoup(
             response.text,
-            "lxml"
+            "lxml",
         )
 
-
-        article = soup.select_one(
+        articles = soup.select(
             "ul.com-blog-part li.box"
         )
 
-
-        if not article:
-
-            print(
-                "櫻坂ブログ取得失敗"
+        if not articles:
+            articles = soup.select(
+                'li:has(a[href*="/diary/detail/"])'
             )
 
-            return None
+        results = []
 
+        for article in articles[
+            :MAX_POSTS_PER_GROUP
+        ]:
+            link = article.select_one(
+                'a[href*="/diary/detail/"]'
+            )
 
-        link = article.select_one(
-            "a[href]"
-        )
+            if not link:
+                continue
 
-
-        if not link:
-
-            return None
-
-
-        blog_url = urljoin(
-            list_url,
-            link["href"]
-        )
-
-
-        detail = requests.get(
-            blog_url,
-            headers=HEADERS,
-            timeout=10
-        )
-
-        detail.raise_for_status()
-
-
-        detail_soup = BeautifulSoup(
-            detail.text,
-            "lxml"
-        )
-
-
-        date = ""
-
-        date_tag = detail_soup.select_one(
-            ".blog-foot .date"
-        )
-
-        if date_tag:
-
-            date = normalize_datetime(
-                date_tag.get_text(
-                    strip=True
+            blog_url = canonicalize_url(
+                urljoin(
+                    list_url,
+                    link.get(
+                        "href",
+                        "",
+                    ),
                 )
             )
 
+            if not blog_url:
+                continue
 
-        member = article.select_one(
-            ".name"
+            member = get_text_from_selectors(
+                article,
+                [
+                    "p.name",
+                    ".name",
+                    ".blog-member",
+                    ".member",
+                ],
+            )
+
+            title = get_text_from_selectors(
+                article,
+                [
+                    "h3.title",
+                    ".title",
+                    ".blog-title",
+                ],
+            )
+
+            date_text = get_text_from_selectors(
+                article,
+                [
+                    "p.date.wf-a",
+                    "p.date",
+                    ".date",
+                    "time",
+                ],
+            )
+
+            results.append(
+                {
+                    "group": "櫻坂46",
+                    "url": blog_url,
+                    "member": member,
+                    "title": title,
+                    "date": normalize_datetime(
+                        date_text
+                    ),
+                    "text": "",
+                }
+            )
+
+        results = remove_duplicate_blogs(
+            results
         )
-
-
-        title = article.select_one(
-            ".title"
-        )
-
-
-        body = detail_soup.select_one(
-            ".box-article"
-        )
-
-
-        result = {
-
-            "group": "櫻坂46",
-
-            "url": blog_url,
-
-            "member":
-                member.get_text(
-                    strip=True
-                )
-                if member else "",
-
-
-            "title":
-                title.get_text(
-                    " ",
-                    strip=True
-                )
-                if title else "",
-
-
-            "date": date,
-
-
-            "text":
-                str(body)
-                if body else ""
-
-        }
-
 
         print(
-            "櫻坂取得:",
-            result
+            "櫻坂取得件数:",
+            len(results),
         )
 
+        return list(
+            reversed(results)
+        )
 
-        return result
-
-
-    except Exception as e:
-
+    except Exception as error:
         print(
             "櫻坂取得エラー:",
-            e
+            error,
         )
-
-        return None
+        return []
 
 
 # =========================
@@ -273,153 +371,160 @@ def get_sakurazaka_latest():
 # =========================
 
 def get_hinatazaka_latest():
-    import requests
-    from bs4 import BeautifulSoup
-    from urllib.parse import urljoin
-
-    url = "https://www.hinatazaka46.com/s/official/diary/member/list?ima=0000"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    response = requests.get(
-        url,
-        headers=headers,
-        timeout=10
+    list_url = (
+        "https://www.hinatazaka46.com"
+        "/s/official/diary/member/list"
+        "?ima=0000"
     )
 
-    response.raise_for_status()
+    try:
+        response = requests.get(
+            list_url,
+            headers=HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
 
-    soup = BeautifulSoup(
-        response.text,
-        "lxml"
-    )
+        response.raise_for_status()
 
-    # 最新ブログURL取得
-    links = []
+        soup = BeautifulSoup(
+            response.text,
+            "lxml",
+        )
 
-    for a in soup.select("a"):
-        href = a.get("href")
+        articles = soup.select(
+            "li.p-blog-top__item"
+        )
 
-        if href and "/diary/detail/" in href:
-            full_url = urljoin(
-                url,
-                href
-            )
+        results = []
 
-            if full_url not in links:
-                links.append(full_url)
+        if articles:
+            for article in articles[
+                :MAX_POSTS_PER_GROUP
+            ]:
+                link = article.select_one(
+                    'a[href*="/diary/detail/"]'
+                )
 
-    if not links:
-        print("日向坂ブログURL取得失敗")
-        return None
+                if not link:
+                    continue
 
-    latest_url = links[0]
+                blog_url = canonicalize_url(
+                    urljoin(
+                        list_url,
+                        link.get(
+                            "href",
+                            "",
+                        ),
+                    )
+                )
 
-    print("日向坂URL:", latest_url)
+                if not blog_url:
+                    continue
 
-    # 記事ページ取得
-    article_response = requests.get(
-        latest_url,
-        headers=headers,
-        timeout=10
-    )
+                member = get_text_from_selectors(
+                    article,
+                    [
+                        ".c-blog-top__name",
+                        ".c-blog-article__name",
+                        ".name",
+                    ],
+                )
 
-    article_response.raise_for_status()
+                title = get_text_from_selectors(
+                    article,
+                    [
+                        ".c-blog-top__title",
+                        ".c-blog-article__title",
+                        ".title",
+                    ],
+                )
 
-    article_soup = BeautifulSoup(
-        article_response.text,
-        "lxml"
-    )
+                date_text = get_text_from_selectors(
+                    article,
+                    [
+                        ".c-blog-article__date time",
+                        ".c-blog-top__date time",
+                        ".c-blog-article__date",
+                        ".date",
+                        "time",
+                    ],
+                )
 
-    print(
-        "日向坂本文:",
-        ".p-blog-article"
-        if article_soup.select_one(".p-blog-article")
-        else "なし"
-    )
+                results.append(
+                    {
+                        "group": "日向坂46",
+                        "url": blog_url,
+                        "member": member,
+                        "title": title,
+                        "date": normalize_datetime(
+                            date_text
+                        ),
+                        "text": "",
+                    }
+                )
 
+        # 一覧のliが取得できなかった場合の予備処理
+        if not results:
+            links = []
 
-    # タイトル
-    title_tag = article_soup.select_one(
-        ".c-blog-article__title"
-    )
+            for link in soup.select(
+                'a[href*="/diary/detail/"]'
+            ):
+                blog_url = canonicalize_url(
+                    urljoin(
+                        list_url,
+                        link.get(
+                            "href",
+                            "",
+                        ),
+                    )
+                )
 
-    title = (
-        title_tag.get_text(strip=True)
-        if title_tag
-        else ""
-    )
+                if (
+                    blog_url
+                    and blog_url not in links
+                ):
+                    links.append(
+                        blog_url
+                    )
 
+                if (
+                    len(links)
+                    >= MAX_POSTS_PER_GROUP
+                ):
+                    break
 
-    # メンバー
-    member_tag = article_soup.select_one(
-        ".c-blog-article__name a"
-    )
+            for blog_url in links:
+                results.append(
+                    {
+                        "group": "日向坂46",
+                        "url": blog_url,
+                        "member": "",
+                        "title": "",
+                        "date": "",
+                        "text": "",
+                    }
+                )
 
-    member = (
-        member_tag.get_text(strip=True)
-        if member_tag
-        else ""
-    )
+        results = remove_duplicate_blogs(
+            results
+        )
 
+        print(
+            "日向坂取得件数:",
+            len(results),
+        )
 
-    # 日付
-    date_tag = article_soup.select_one(
-        ".c-blog-article__date time"
-    )
+        return list(
+            reversed(results)
+        )
 
-    date = ""
-
-    if date_tag:
-        date_text = date_tag.text.strip()
-
-        # 2026.7.10 17:56 → 2026年07月10日 17:56
-        try:
-            date_part, time_part = date_text.split()
-
-            y, m, d = date_part.split(".")
-
-            date = (
-                f"{y}年"
-                f"{int(m):02d}月"
-                f"{int(d):02d}日 "
-                f"{time_part}"
-            )
-
-        except Exception:
-            date = date_text
-
-
-    # 本文
-    body = article_soup.select_one(
-        ".c-blog-article__text"
-    )
-
-    text = (
-        str(body)
-        if body
-        else ""
-    )
-
-
-    data = {
-        "group": "日向坂46",
-        "url": latest_url,
-        "member": member,
-        "title": title,
-        "date": date,
-        "text": text
-    }
-
-
-    print(
-        "日向坂取得:",
-        data
-    )
-
-    return data
+    except Exception as error:
+        print(
+            "日向坂取得エラー:",
+            error,
+        )
+        return []
 
 
 # =========================
@@ -427,51 +532,49 @@ def get_hinatazaka_latest():
 # =========================
 
 def get_latest_blog():
-
     results = []
 
-
-    funcs = [
-
+    functions = [
         get_nogizaka_latest,
-
         get_sakurazaka_latest,
-
-        get_hinatazaka_latest
-
+        get_hinatazaka_latest,
     ]
 
+    for function in functions:
+        try:
+            blogs = function()
 
-    for func in funcs:
+            if isinstance(blogs, dict):
+                results.append(
+                    blogs
+                )
 
+            elif isinstance(blogs, list):
+                results.extend(
+                    blogs
+                )
 
-        blog = func()
-
-
-        if isinstance(
-            blog,
-            dict
-        ):
-
-            results.append(
-                blog
+        except Exception as error:
+            print(
+                f"{function.__name__} 実行エラー:",
+                error,
             )
 
-
-        elif isinstance(
-            blog,
-            list
-        ):
-
-            results.extend(
-                blog
-            )
-
-
-    print(
-        "最終取得:",
+    results = remove_duplicate_blogs(
         results
     )
 
+    print(
+        "最終取得件数:",
+        len(results),
+    )
+
+    for blog in results:
+        print(
+            blog.get("group", ""),
+            blog.get("member", ""),
+            blog.get("title", ""),
+            blog.get("url", ""),
+        )
 
     return results
