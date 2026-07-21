@@ -10,7 +10,10 @@ from media_converter import send_blog_media
 CHECK_INTERVAL = 600
 
 
-def build_notification_text(blog, image_count):
+def build_notification_text(
+    blog,
+    image_count,
+):
     return (
         f"🏷️ {blog.get('group', '')}\n"
         f"👤 {blog.get('member', '')}\n"
@@ -21,7 +24,54 @@ def build_notification_text(blog, image_count):
     )
 
 
-async def notify_channel(channel, blog, images):
+def merge_blog_detail(
+    blog,
+    detail,
+):
+    """
+    一覧ページの情報と詳細ページの情報を統合する。
+
+    詳細ページ側に値がある場合は、
+    メンバー名・タイトル・日時などを詳細情報で補完する。
+    """
+
+    merged = dict(blog)
+
+    if not isinstance(detail, dict):
+        return merged
+
+    fields = [
+        "group",
+        "member",
+        "title",
+        "date",
+        "text",
+    ]
+
+    for field in fields:
+        detail_value = detail.get(
+            field,
+            "",
+        )
+
+        if detail_value:
+            merged[field] = detail_value
+
+    # URLは一覧側の正規化済みURLを優先する
+    if not merged.get("url"):
+        merged["url"] = detail.get(
+            "url",
+            "",
+        )
+
+    return merged
+
+
+async def notify_channel(
+    channel,
+    blog,
+    images,
+):
     text = build_notification_text(
         blog,
         len(images),
@@ -49,14 +99,20 @@ async def check_blog(bot):
             )
 
             for blog in blogs:
-                if not isinstance(blog, dict):
+                if not isinstance(
+                    blog,
+                    dict,
+                ):
                     print(
                         "不正データ:",
                         blog,
                     )
                     continue
 
-                url = blog.get("url")
+                url = blog.get(
+                    "url",
+                    "",
+                )
 
                 if not url:
                     continue
@@ -100,9 +156,16 @@ async def check_blog(bot):
                     )
                     continue
 
+                # 詳細ページを取得
                 detail = await asyncio.to_thread(
                     get_images,
                     url,
+                )
+
+                # 一覧情報と詳細情報を統合
+                complete_blog = merge_blog_detail(
+                    blog,
+                    detail,
                 )
 
                 images = (
@@ -115,6 +178,26 @@ async def check_blog(bot):
                         dict,
                     )
                     else []
+                )
+
+                print(
+                    "詳細情報:",
+                    complete_blog.get(
+                        "group",
+                        "",
+                    ),
+                    complete_blog.get(
+                        "member",
+                        "",
+                    ),
+                    complete_blog.get(
+                        "title",
+                        "",
+                    ),
+                    complete_blog.get(
+                        "date",
+                        "",
+                    ),
                 )
 
                 print(
@@ -143,7 +226,7 @@ async def check_blog(bot):
                     try:
                         await notify_channel(
                             channel,
-                            blog,
+                            complete_blog,
                             images,
                         )
 
@@ -166,24 +249,27 @@ async def check_blog(bot):
                             error,
                         )
 
-                # 少なくとも1か所へ通知でき、
-                # 全通知先が成功した場合だけ保存
+                # 1か所以上に通知でき、
+                # すべての通知先で成功した場合だけDB保存
                 if (
                     notified_count > 0
                     and all_succeeded
                 ):
                     save_blog(
                         url,
-                        group,
-                        blog.get(
+                        complete_blog.get(
+                            "group",
+                            "",
+                        ),
+                        complete_blog.get(
                             "member",
                             "",
                         ),
-                        blog.get(
+                        complete_blog.get(
                             "title",
                             "",
                         ),
-                        blog.get(
+                        complete_blog.get(
                             "date",
                             "",
                         ),
