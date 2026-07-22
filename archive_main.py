@@ -12,6 +12,10 @@ from archive_database import (
     save_archive,
     reset_archive,
 )
+from photo_database import (
+    init_photo_db,
+    get_photo_db_counts,
+)
 from archive_image_getter import get_images
 from archive_config import (
     ARCHIVE_INTERVAL,
@@ -418,6 +422,10 @@ async def on_ready():
 
     print("アーカイブDB初期化完了")
 
+    init_photo_db()
+
+    print("写真検索DB初期化完了")
+
     print(
         f"保存済みチェック間隔: "
         f"{ARCHIVE_INTERVAL}秒"
@@ -426,7 +434,6 @@ async def on_ready():
     print("!archive_start で開始")
 
     print("=" * 40)
-
 
 # =========================
 # 開始コマンド
@@ -456,6 +463,42 @@ async def archive_start(ctx):
     print(
         "アーカイブ巡回を開始しました。"
     )
+
+# =========================
+# 写真検索DB件数確認
+# =========================
+
+@bot.command(
+    name="photo_count"
+)
+@commands.is_owner()
+async def photo_count_command(ctx):
+
+    try:
+
+        counts = get_photo_db_counts()
+
+        await ctx.send(
+            "📷 **写真検索DBの状態**\n"
+            f"ブログ: **{counts['blogs']}件**\n"
+            f"画像: **{counts['images']}件**\n"
+            f"AIタグ: **{counts['ai_tags']}件**\n"
+            f"手動タグ: **{counts['manual_tags']}件**\n"
+            f"確認待ち: **{counts['pending_reviews']}件**\n"
+            f"お気に入り: **{counts['favorites']}件**"
+        )
+
+    except Exception as error:
+
+        print(
+            "写真検索DB件数取得エラー:",
+            error
+        )
+
+        await ctx.send(
+            "⚠️ 写真検索DBの件数取得に失敗しました。\n"
+            f"`{error}`"
+        )
 
 
 # =========================
