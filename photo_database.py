@@ -1081,6 +1081,102 @@ def get_photo_db_counts() -> dict[str, int]:
 
     return counts
 
+# =========================
+# 画像保存状況
+# =========================
+
+def get_photo_storage_stats() -> dict[str, int]:
+    """
+    画像ファイルの保存状況を返す。
+
+    completed:
+        ダウンロード完了件数
+
+    pending:
+        未ダウンロード件数
+
+    failed:
+        ダウンロード失敗件数
+
+    total_size:
+        保存済み画像の合計容量（bytes）
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total_images,
+
+                SUM(
+                    CASE
+                        WHEN download_status = 'completed'
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS completed,
+
+                SUM(
+                    CASE
+                        WHEN download_status = 'pending'
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS pending,
+
+                SUM(
+                    CASE
+                        WHEN download_status = 'failed'
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS failed,
+
+                SUM(
+                    CASE
+                        WHEN download_status = 'completed'
+                        THEN file_size
+                        ELSE 0
+                    END
+                ) AS total_size
+
+            FROM photo_images
+            """
+        )
+
+        row = cursor.fetchone()
+
+    if row is None:
+
+        return {
+            "total_images": 0,
+            "completed": 0,
+            "pending": 0,
+            "failed": 0,
+            "total_size": 0,
+        }
+
+    return {
+        "total_images": int(
+            row["total_images"] or 0
+        ),
+        "completed": int(
+            row["completed"] or 0
+        ),
+        "pending": int(
+            row["pending"] or 0
+        ),
+        "failed": int(
+            row["failed"] or 0
+        ),
+        "total_size": int(
+            row["total_size"] or 0
+        ),
+    }
+
 
 # =========================
 # 単体実行テスト
