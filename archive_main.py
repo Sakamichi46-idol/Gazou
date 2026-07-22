@@ -18,6 +18,10 @@ from photo_database import (
     save_photo_blog,
     save_photo_image,
 )
+from photo_image_downloader import (
+    download_blog_images,
+    get_photo_storage_path,
+)
 from archive_image_getter import get_images
 from archive_config import (
     ARCHIVE_INTERVAL,
@@ -427,6 +431,11 @@ async def on_ready():
     init_photo_db()
 
     print("写真検索DB初期化完了")
+    
+    print(
+        "写真画像保存先:",
+        get_photo_storage_path()
+    )
 
     print(
         f"保存済みチェック間隔: "
@@ -725,19 +734,46 @@ async def archive_loop():
 
                 blog["images"] = image_urls
 
-                blog_id = save_photo_blog(blog)
+                blog_id = save_photo_blog(
+                    blog
+                )
+
+                photo_image_records = []
 
                 for image_index, image_url in enumerate(
                     image_urls,
                     start=1
                 ):
 
-                    save_photo_image(
+                    image_id = save_photo_image(
                         blog_id=blog_id,
                         image_url=image_url,
-                        image_index=image_index
+                        image_index=image_index,
                     )
 
+                    photo_image_records.append({
+                        "image_id": image_id,
+                        "image_url": image_url,
+                        "image_index": image_index,
+                    })
+
+
+                # =====================
+                # 画像ファイルをVolumeへ保存
+                # =====================
+
+                download_result = await download_blog_images(
+                    session,
+                    blog_id=blog_id,
+                    blog=blog,
+                    image_records=photo_image_records,
+                )
+
+                print(
+                    "写真画像保存結果:",
+                    f"成功 {download_result['success']}件 / "
+                    f"失敗 {download_result['failed']}件"
+                )
 
 
 
