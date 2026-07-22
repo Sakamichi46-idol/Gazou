@@ -15,6 +15,7 @@ from archive_database import (
 from photo_database import (
     init_photo_db,
     get_photo_db_counts,
+    get_photo_storage_stats,
     save_photo_blog,
     save_photo_image,
 )
