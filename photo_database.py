@@ -1,5 +1,7 @@
+import json
 import os
 import sqlite3
+
 from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any
@@ -13,24 +15,35 @@ from typing import Any
 # ローカル実行などで /data が使えない場合は、
 # プロジェクト内の data フォルダへ保存する。
 RAILWAY_DATA_DIR = "/data"
+
 LOCAL_DATA_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "data"
+    os.path.dirname(
+        os.path.abspath(__file__)
+    ),
+    "data",
 )
 
 
 def get_data_dir() -> str:
     """
     写真検索用データの保存先を返す。
-    Railwayでは /data、ローカルでは ./data を使用する。
+
+    Railway:
+        /data
+
+    ローカル:
+        ./data
     """
 
-    if os.path.isdir(RAILWAY_DATA_DIR):
+    if os.path.isdir(
+        RAILWAY_DATA_DIR
+    ):
+
         return RAILWAY_DATA_DIR
 
     os.makedirs(
         LOCAL_DATA_DIR,
-        exist_ok=True
+        exist_ok=True,
     )
 
     return LOCAL_DATA_DIR
@@ -42,8 +55,8 @@ PHOTO_DB_PATH = os.getenv(
     "PHOTO_DB_PATH",
     os.path.join(
         DATA_DIR,
-        "photo_archive.db"
-    )
+        "photo_archive.db",
+    ),
 )
 
 
@@ -68,10 +81,12 @@ def get_connection() -> sqlite3.Connection:
 
     connection = sqlite3.connect(
         PHOTO_DB_PATH,
-        timeout=30
+        timeout=30,
     )
 
-    connection.row_factory = sqlite3.Row
+    connection.row_factory = (
+        sqlite3.Row
+    )
 
     connection.execute(
         "PRAGMA foreign_keys = ON"
@@ -89,16 +104,48 @@ def get_connection() -> sqlite3.Connection:
 
 
 def row_to_dict(
-    row: sqlite3.Row | None
+    row: sqlite3.Row | None,
 ) -> dict[str, Any] | None:
     """
     sqlite3.Rowを辞書へ変換する。
     """
 
     if row is None:
+
         return None
 
-    return dict(row)
+    return dict(
+        row
+    )
+
+
+def rows_to_dicts(
+    rows: list[sqlite3.Row],
+) -> list[dict[str, Any]]:
+    """
+    sqlite3.Rowの一覧を辞書一覧へ変換する。
+    """
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+def clamp_confidence(
+    confidence: float,
+) -> float:
+    """
+    信頼度を0.0から1.0の範囲に収める。
+    """
+
+    return max(
+        0.0,
+        min(
+            float(confidence),
+            1.0,
+        ),
+    )
 
 
 # =========================
@@ -108,11 +155,16 @@ def row_to_dict(
 def init_photo_db() -> None:
     """
     写真検索用DBと必要なテーブルを作成する。
+
+    既存のphoto_archive.dbが存在する場合でも、
+    データを削除せず不足テーブルだけ追加する。
     """
 
     os.makedirs(
-        os.path.dirname(PHOTO_DB_PATH),
-        exist_ok=True
+        os.path.dirname(
+            PHOTO_DB_PATH
+        ),
+        exist_ok=True,
     )
 
     with closing(
@@ -280,7 +332,7 @@ def init_photo_db() -> None:
         )
 
         # -------------------------
-        # 人間による確認待ち
+        # 画像単位の確認待ち
         # -------------------------
 
         cursor.execute(
@@ -334,9 +386,150 @@ def init_photo_db() -> None:
             """
         )
 
+        # =========================
+        # ここから人物認識用の追加テーブル
+        # =========================
+
         # -------------------------
+        # 人物マスター
+        # -------------------------
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS photo_people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                person_name TEXT NOT NULL UNIQUE,
+                group_name TEXT NOT NULL DEFAULT '',
+                generation_name TEXT NOT NULL DEFAULT '',
+
+                is_active INTEGER NOT NULL DEFAULT 1,
+
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+        # -------------------------
+        # 画像内で検出された顔
+        # -------------------------
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS photo_faces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                image_id INTEGER NOT NULL,
+                face_index INTEGER NOT NULL DEFAULT 0,
+
+                box_x REAL NOT NULL DEFAULT 0,
+                box_y REAL NOT NULL DEFAULT 0,
+                box_width REAL NOT NULL DEFAULT 0,
+                box_height REAL NOT NULL DEFAULT 0,
+
+                detection_confidence REAL NOT NULL DEFAULT 0,
+
+                confirmed_person_id INTEGER,
+
+                confirmation_status TEXT
+                    NOT NULL DEFAULT 'unconfirmed',
+
+                confirmed_by TEXT NOT NULL DEFAULT '',
+                confirmed_at TEXT NOT NULL DEFAULT '',
+
+                model_name TEXT NOT NULL DEFAULT '',
+                face_embedding TEXT NOT NULL DEFAULT '',
+
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+
+                UNIQUE(image_id, face_index),
+
+                FOREIGN KEY(image_id)
+                    REFERENCES photo_images(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY(confirmed_person_id)
+                    REFERENCES photo_people(id)
+                    ON DELETE SET NULL
+            )
+            """
+        )
+
+        # -------------------------
+        # 顔ごとの人物候補
+        # -------------------------
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS photo_face_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                face_id INTEGER NOT NULL,
+                person_id INTEGER NOT NULL,
+
+                confidence REAL NOT NULL DEFAULT 0,
+                candidate_rank INTEGER NOT NULL DEFAULT 0,
+
+                model_name TEXT NOT NULL DEFAULT '',
+                raw_value TEXT NOT NULL DEFAULT '',
+
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+
+                UNIQUE(face_id, person_id),
+
+                FOREIGN KEY(face_id)
+                    REFERENCES photo_faces(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY(person_id)
+                    REFERENCES photo_people(id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+
+        # -------------------------
+        # 顔単位の確認待ち
+        # -------------------------
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS photo_face_reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                face_id INTEGER NOT NULL UNIQUE,
+
+                question TEXT NOT NULL DEFAULT '',
+                candidates TEXT NOT NULL DEFAULT '',
+
+                status TEXT NOT NULL DEFAULT 'pending',
+
+                selected_person_id INTEGER,
+
+                reviewed_by TEXT NOT NULL DEFAULT '',
+                review_note TEXT NOT NULL DEFAULT '',
+
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                reviewed_at TEXT NOT NULL DEFAULT '',
+
+                FOREIGN KEY(face_id)
+                    REFERENCES photo_faces(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY(selected_person_id)
+                    REFERENCES photo_people(id)
+                    ON DELETE SET NULL
+            )
+            """
+        )
+
+        # =========================
         # 検索高速化用インデックス
-        # -------------------------
+        # =========================
 
         cursor.execute(
             """
@@ -373,6 +566,14 @@ def init_photo_db() -> None:
         cursor.execute(
             """
             CREATE INDEX IF NOT EXISTS
+            idx_photo_images_download_status
+            ON photo_images(download_status)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
             idx_photo_images_analysis_status
             ON photo_images(analysis_status)
             """
@@ -383,6 +584,14 @@ def init_photo_db() -> None:
             CREATE INDEX IF NOT EXISTS
             idx_photo_ai_tags_tag
             ON photo_ai_tags(tag)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_ai_tags_category
+            ON photo_ai_tags(category)
             """
         )
 
@@ -402,11 +611,75 @@ def init_photo_db() -> None:
             """
         )
 
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_people_name
+            ON photo_people(person_name)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_people_group
+            ON photo_people(group_name)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_faces_image
+            ON photo_faces(image_id)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_faces_person
+            ON photo_faces(confirmed_person_id)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_faces_status
+            ON photo_faces(confirmation_status)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_face_candidates_face
+            ON photo_face_candidates(face_id)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_face_candidates_person
+            ON photo_face_candidates(person_id)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_photo_face_reviews_status
+            ON photo_face_reviews(status)
+            """
+        )
+
         connection.commit()
 
     print(
         "写真検索DB初期化完了:",
-        PHOTO_DB_PATH
+        PHOTO_DB_PATH,
     )
 
 
@@ -415,7 +688,7 @@ def init_photo_db() -> None:
 # =========================
 
 def save_photo_blog(
-    blog: dict[str, Any]
+    blog: dict[str, Any],
 ) -> int:
     """
     ブログ記事を登録または更新し、
@@ -423,28 +696,44 @@ def save_photo_blog(
     """
 
     blog_url = str(
-        blog.get("url", "")
+        blog.get(
+            "url",
+            "",
+        )
     ).strip()
 
     if not blog_url:
+
         raise ValueError(
             "ブログURLが空です。"
         )
 
     group_name = str(
-        blog.get("group", "")
+        blog.get(
+            "group",
+            "",
+        )
     ).strip()
 
     member_name = str(
-        blog.get("member", "")
+        blog.get(
+            "member",
+            "",
+        )
     ).strip()
 
     title = str(
-        blog.get("title", "")
+        blog.get(
+            "title",
+            "",
+        )
     ).strip()
 
     published_at = str(
-        blog.get("date", "")
+        blog.get(
+            "date",
+            "",
+        )
     ).strip()
 
     now = utc_now_text()
@@ -484,7 +773,7 @@ def save_photo_blog(
                 published_at,
                 now,
                 now,
-            )
+            ),
         )
 
         cursor.execute(
@@ -495,7 +784,7 @@ def save_photo_blog(
             """,
             (
                 blog_url,
-            )
+            ),
         )
 
         row = cursor.fetchone()
@@ -503,6 +792,7 @@ def save_photo_blog(
         connection.commit()
 
     if row is None:
+
         raise RuntimeError(
             "ブログ情報の保存に失敗しました。"
         )
@@ -513,7 +803,7 @@ def save_photo_blog(
 
 
 def get_photo_blog_by_url(
-    blog_url: str
+    blog_url: str,
 ) -> dict[str, Any] | None:
     """
     URLからブログ情報を取得する。
@@ -531,7 +821,7 @@ def get_photo_blog_by_url(
             """,
             (
                 blog_url,
-            )
+            ),
         )
 
         return row_to_dict(
@@ -566,6 +856,7 @@ def save_photo_image(
     ).strip()
 
     if not image_url:
+
         raise ValueError(
             "画像URLが空です。"
         )
@@ -608,14 +899,55 @@ def save_photo_image(
             ON CONFLICT(blog_id, image_url)
             DO UPDATE SET
                 image_index = excluded.image_index,
-                local_path = excluded.local_path,
-                file_name = excluded.file_name,
-                mime_type = excluded.mime_type,
-                file_size = excluded.file_size,
-                width = excluded.width,
-                height = excluded.height,
-                image_hash = excluded.image_hash,
-                download_status = excluded.download_status,
+
+                local_path = CASE
+                    WHEN excluded.local_path != ''
+                    THEN excluded.local_path
+                    ELSE photo_images.local_path
+                END,
+
+                file_name = CASE
+                    WHEN excluded.file_name != ''
+                    THEN excluded.file_name
+                    ELSE photo_images.file_name
+                END,
+
+                mime_type = CASE
+                    WHEN excluded.mime_type != ''
+                    THEN excluded.mime_type
+                    ELSE photo_images.mime_type
+                END,
+
+                file_size = CASE
+                    WHEN excluded.file_size > 0
+                    THEN excluded.file_size
+                    ELSE photo_images.file_size
+                END,
+
+                width = CASE
+                    WHEN excluded.width > 0
+                    THEN excluded.width
+                    ELSE photo_images.width
+                END,
+
+                height = CASE
+                    WHEN excluded.height > 0
+                    THEN excluded.height
+                    ELSE photo_images.height
+                END,
+
+                image_hash = CASE
+                    WHEN excluded.image_hash != ''
+                    THEN excluded.image_hash
+                    ELSE photo_images.image_hash
+                END,
+
+                download_status = CASE
+                    WHEN photo_images.download_status = 'completed'
+                    THEN photo_images.download_status
+                    ELSE excluded.download_status
+                END,
+
                 updated_at = excluded.updated_at
             """,
             (
@@ -632,7 +964,7 @@ def save_photo_image(
                 download_status,
                 now,
                 now,
-            )
+            ),
         )
 
         cursor.execute(
@@ -645,7 +977,7 @@ def save_photo_image(
             (
                 blog_id,
                 image_url,
-            )
+            ),
         )
 
         row = cursor.fetchone()
@@ -653,6 +985,7 @@ def save_photo_image(
         connection.commit()
 
     if row is None:
+
         raise RuntimeError(
             "画像情報の保存に失敗しました。"
         )
@@ -663,7 +996,7 @@ def save_photo_image(
 
 
 def get_photo_image(
-    image_id: int
+    image_id: int,
 ) -> dict[str, Any] | None:
     """
     画像IDから画像情報を取得する。
@@ -677,6 +1010,7 @@ def get_photo_image(
             """
             SELECT
                 photo_images.*,
+
                 photo_blogs.blog_url,
                 photo_blogs.group_name,
                 photo_blogs.member_name,
@@ -686,17 +1020,77 @@ def get_photo_image(
             FROM photo_images
 
             INNER JOIN photo_blogs
-                ON photo_images.blog_id = photo_blogs.id
+                ON photo_images.blog_id
+                = photo_blogs.id
 
             WHERE photo_images.id = ?
             """,
             (
                 image_id,
-            )
+            ),
         )
 
         return row_to_dict(
             cursor.fetchone()
+        )
+
+
+def get_pending_analysis_images(
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    ダウンロード済みで、
+    AI解析が未完了の画像を取得する。
+    """
+
+    limit = max(
+        int(limit),
+        1,
+    )
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.execute(
+            """
+            SELECT
+                photo_images.*,
+
+                photo_blogs.blog_url,
+                photo_blogs.group_name,
+                photo_blogs.member_name,
+                photo_blogs.title,
+                photo_blogs.published_at
+
+            FROM photo_images
+
+            INNER JOIN photo_blogs
+                ON photo_images.blog_id
+                = photo_blogs.id
+
+            WHERE
+                photo_images.download_status = 'completed'
+
+            AND
+                photo_images.analysis_status
+                IN ('pending', 'failed')
+
+            AND
+                photo_images.local_path != ''
+
+            ORDER BY
+                photo_images.id ASC
+
+            LIMIT ?
+            """,
+            (
+                limit,
+            ),
+        )
+
+        return rows_to_dicts(
+            cursor.fetchall()
         )
 
 
@@ -752,7 +1146,7 @@ def update_image_download(
                 status,
                 utc_now_text(),
                 image_id,
-            )
+            ),
         )
 
         connection.commit()
@@ -765,6 +1159,13 @@ def update_image_analysis_status(
 ) -> None:
     """
     AI解析状態を更新する。
+
+    主なstatus:
+        pending
+        processing
+        completed
+        review
+        failed
     """
 
     with closing(
@@ -787,7 +1188,103 @@ def update_image_analysis_status(
                 error_message,
                 utc_now_text(),
                 image_id,
+            ),
+        )
+
+        connection.commit()
+
+
+# =========================
+# AI解析結果
+# =========================
+
+def save_ai_analysis(
+    image_id: int,
+    *,
+    model_name: str = "",
+    raw_response: str = "",
+    person_name: str = "",
+    clothing: str = "",
+    expression: str = "",
+    background: str = "",
+    pose: str = "",
+    objects: str = "",
+    person_count: int = 0,
+    overall_confidence: float = 0,
+    needs_review: bool = False,
+) -> None:
+    """
+    画像全体のAI解析結果を保存する。
+    """
+
+    now = utc_now_text()
+
+    overall_confidence = clamp_confidence(
+        overall_confidence
+    )
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            INSERT INTO photo_ai_analysis (
+                image_id,
+                model_name,
+                raw_response,
+                person_name,
+                clothing,
+                expression,
+                background,
+                pose,
+                objects,
+                person_count,
+                overall_confidence,
+                needs_review,
+                created_at,
+                updated_at
             )
+            VALUES (
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?
+            )
+
+            ON CONFLICT(image_id)
+            DO UPDATE SET
+                model_name = excluded.model_name,
+                raw_response = excluded.raw_response,
+                person_name = excluded.person_name,
+                clothing = excluded.clothing,
+                expression = excluded.expression,
+                background = excluded.background,
+                pose = excluded.pose,
+                objects = excluded.objects,
+                person_count = excluded.person_count,
+                overall_confidence
+                    = excluded.overall_confidence,
+                needs_review = excluded.needs_review,
+                updated_at = excluded.updated_at
+            """,
+            (
+                image_id,
+                model_name,
+                raw_response,
+                person_name,
+                clothing,
+                expression,
+                background,
+                pose,
+                objects,
+                max(
+                    int(person_count),
+                    0,
+                ),
+                overall_confidence,
+                1 if needs_review else 0,
+                now,
+                now,
+            ),
         )
 
         connection.commit()
@@ -813,15 +1310,16 @@ def save_ai_tag(
         tag
     ).strip()
 
+    category = str(
+        category
+    ).strip()
+
     if not tag:
+
         return
 
-    confidence = max(
-        0.0,
-        min(
-            float(confidence),
-            1.0
-        )
+    confidence = clamp_confidence(
+        confidence
     )
 
     now = utc_now_text()
@@ -860,7 +1358,7 @@ def save_ai_tag(
                 raw_value,
                 now,
                 now,
-            )
+            ),
         )
 
         connection.commit()
@@ -885,7 +1383,12 @@ def save_manual_tag(
         tag
     ).strip()
 
+    category = str(
+        category
+    ).strip()
+
     if not tag:
+
         return
 
     now = utc_now_text()
@@ -921,14 +1424,538 @@ def save_manual_tag(
                 note,
                 now,
                 now,
-            )
+            ),
         )
 
         connection.commit()
 
 
 # =========================
-# 確認待ち
+# 人物マスター
+# =========================
+
+def save_person(
+    person_name: str,
+    group_name: str = "",
+    generation_name: str = "",
+    is_active: bool = True,
+) -> int:
+    """
+    人物を登録または更新し、
+    photo_people.idを返す。
+    """
+
+    person_name = str(
+        person_name
+    ).strip()
+
+    group_name = str(
+        group_name
+    ).strip()
+
+    generation_name = str(
+        generation_name
+    ).strip()
+
+    if not person_name:
+
+        raise ValueError(
+            "人物名が空です。"
+        )
+
+    now = utc_now_text()
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            INSERT INTO photo_people (
+                person_name,
+                group_name,
+                generation_name,
+                is_active,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+
+            ON CONFLICT(person_name)
+            DO UPDATE SET
+                group_name = CASE
+                    WHEN excluded.group_name != ''
+                    THEN excluded.group_name
+                    ELSE photo_people.group_name
+                END,
+
+                generation_name = CASE
+                    WHEN excluded.generation_name != ''
+                    THEN excluded.generation_name
+                    ELSE photo_people.generation_name
+                END,
+
+                is_active = excluded.is_active,
+                updated_at = excluded.updated_at
+            """,
+            (
+                person_name,
+                group_name,
+                generation_name,
+                1 if is_active else 0,
+                now,
+                now,
+            ),
+        )
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM photo_people
+            WHERE person_name = ?
+            """,
+            (
+                person_name,
+            ),
+        )
+
+        row = cursor.fetchone()
+
+        connection.commit()
+
+    if row is None:
+
+        raise RuntimeError(
+            "人物情報の保存に失敗しました。"
+        )
+
+    return int(
+        row["id"]
+    )
+
+
+def get_person_by_name(
+    person_name: str,
+) -> dict[str, Any] | None:
+    """
+    人物名から人物情報を取得する。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.execute(
+            """
+            SELECT *
+            FROM photo_people
+            WHERE person_name = ?
+            """,
+            (
+                person_name,
+            ),
+        )
+
+        return row_to_dict(
+            cursor.fetchone()
+        )
+
+
+def get_all_people(
+    active_only: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    人物マスターの一覧を取得する。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        if active_only:
+
+            cursor = connection.execute(
+                """
+                SELECT *
+                FROM photo_people
+                WHERE is_active = 1
+                ORDER BY
+                    group_name ASC,
+                    person_name ASC
+                """
+            )
+
+        else:
+
+            cursor = connection.execute(
+                """
+                SELECT *
+                FROM photo_people
+                ORDER BY
+                    group_name ASC,
+                    person_name ASC
+                """
+            )
+
+        return rows_to_dicts(
+            cursor.fetchall()
+        )
+
+
+# =========================
+# 顔検出
+# =========================
+
+def save_detected_face(
+    image_id: int,
+    face_index: int,
+    *,
+    box_x: float = 0,
+    box_y: float = 0,
+    box_width: float = 0,
+    box_height: float = 0,
+    detection_confidence: float = 0,
+    model_name: str = "",
+    face_embedding: str = "",
+) -> int:
+    """
+    画像内で検出された顔を保存する。
+
+    座標は次のどちらでも保存できる。
+
+    ・実際のピクセル座標
+    ・画像幅・高さを1.0とした比率
+
+    顔番号は1から始めることを推奨する。
+    """
+
+    now = utc_now_text()
+
+    detection_confidence = clamp_confidence(
+        detection_confidence
+    )
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            INSERT INTO photo_faces (
+                image_id,
+                face_index,
+                box_x,
+                box_y,
+                box_width,
+                box_height,
+                detection_confidence,
+                confirmation_status,
+                model_name,
+                face_embedding,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                ?, ?, ?, ?, ?, ?,
+                ?, 'unconfirmed',
+                ?, ?, ?, ?
+            )
+
+            ON CONFLICT(image_id, face_index)
+            DO UPDATE SET
+                box_x = excluded.box_x,
+                box_y = excluded.box_y,
+                box_width = excluded.box_width,
+                box_height = excluded.box_height,
+                detection_confidence
+                    = excluded.detection_confidence,
+                model_name = excluded.model_name,
+
+                face_embedding = CASE
+                    WHEN excluded.face_embedding != ''
+                    THEN excluded.face_embedding
+                    ELSE photo_faces.face_embedding
+                END,
+
+                updated_at = excluded.updated_at
+            """,
+            (
+                image_id,
+                int(face_index),
+                float(box_x),
+                float(box_y),
+                float(box_width),
+                float(box_height),
+                detection_confidence,
+                model_name,
+                face_embedding,
+                now,
+                now,
+            ),
+        )
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM photo_faces
+            WHERE image_id = ?
+            AND face_index = ?
+            """,
+            (
+                image_id,
+                int(face_index),
+            ),
+        )
+
+        row = cursor.fetchone()
+
+        connection.commit()
+
+    if row is None:
+
+        raise RuntimeError(
+            "顔情報の保存に失敗しました。"
+        )
+
+    return int(
+        row["id"]
+    )
+
+
+def save_face_candidate(
+    face_id: int,
+    person_id: int,
+    confidence: float,
+    candidate_rank: int = 0,
+    model_name: str = "",
+    raw_value: str = "",
+) -> None:
+    """
+    顔に対する人物候補を保存する。
+
+    例:
+        顔1
+        ・菅原咲月 0.91
+        ・小川彩 0.07
+    """
+
+    confidence = clamp_confidence(
+        confidence
+    )
+
+    now = utc_now_text()
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            INSERT INTO photo_face_candidates (
+                face_id,
+                person_id,
+                confidence,
+                candidate_rank,
+                model_name,
+                raw_value,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+
+            ON CONFLICT(face_id, person_id)
+            DO UPDATE SET
+                confidence = excluded.confidence,
+                candidate_rank = excluded.candidate_rank,
+                model_name = excluded.model_name,
+                raw_value = excluded.raw_value,
+                updated_at = excluded.updated_at
+            """,
+            (
+                face_id,
+                person_id,
+                confidence,
+                int(candidate_rank),
+                model_name,
+                raw_value,
+                now,
+                now,
+            ),
+        )
+
+        connection.commit()
+
+
+def confirm_face_person(
+    face_id: int,
+    person_id: int,
+    *,
+    confirmed_by: str = "",
+    confirmation_status: str = "confirmed",
+) -> None:
+    """
+    顔に写っている人物を確定する。
+
+    confirmation_status例:
+        auto_confirmed
+        confirmed
+        manually_confirmed
+    """
+
+    now = utc_now_text()
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            UPDATE photo_faces
+
+            SET
+                confirmed_person_id = ?,
+                confirmation_status = ?,
+                confirmed_by = ?,
+                confirmed_at = ?,
+                updated_at = ?
+
+            WHERE id = ?
+            """,
+            (
+                person_id,
+                confirmation_status,
+                confirmed_by,
+                now,
+                now,
+                face_id,
+            ),
+        )
+
+        connection.commit()
+
+
+def clear_face_confirmation(
+    face_id: int,
+) -> None:
+    """
+    顔の人物確定を解除する。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            UPDATE photo_faces
+
+            SET
+                confirmed_person_id = NULL,
+                confirmation_status = 'unconfirmed',
+                confirmed_by = '',
+                confirmed_at = '',
+                updated_at = ?
+
+            WHERE id = ?
+            """,
+            (
+                utc_now_text(),
+                face_id,
+            ),
+        )
+
+        connection.commit()
+
+
+def get_image_faces(
+    image_id: int,
+) -> list[dict[str, Any]]:
+    """
+    画像に含まれる顔と、
+    確定済み人物名を取得する。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.execute(
+            """
+            SELECT
+                photo_faces.*,
+                photo_people.person_name
+                    AS confirmed_person_name,
+                photo_people.group_name
+                    AS confirmed_group_name
+
+            FROM photo_faces
+
+            LEFT JOIN photo_people
+                ON photo_faces.confirmed_person_id
+                = photo_people.id
+
+            WHERE photo_faces.image_id = ?
+
+            ORDER BY
+                photo_faces.face_index ASC
+            """,
+            (
+                image_id,
+            ),
+        )
+
+        return rows_to_dicts(
+            cursor.fetchall()
+        )
+
+
+def get_face_candidates(
+    face_id: int,
+) -> list[dict[str, Any]]:
+    """
+    顔に登録されている人物候補を取得する。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.execute(
+            """
+            SELECT
+                photo_face_candidates.*,
+                photo_people.person_name,
+                photo_people.group_name,
+                photo_people.generation_name
+
+            FROM photo_face_candidates
+
+            INNER JOIN photo_people
+                ON photo_face_candidates.person_id
+                = photo_people.id
+
+            WHERE photo_face_candidates.face_id = ?
+
+            ORDER BY
+                photo_face_candidates.candidate_rank ASC,
+                photo_face_candidates.confidence DESC
+            """,
+            (
+                face_id,
+            ),
+        )
+
+        return rows_to_dicts(
+            cursor.fetchall()
+        )
+
+
+# =========================
+# 画像単位の確認待ち
 # =========================
 
 def add_review_item(
@@ -938,9 +1965,9 @@ def add_review_item(
     candidates: str = "",
 ) -> None:
     """
-    人間による確認待ち画像を登録する。
+    人間による画像単位の確認待ちを登録する。
 
-    candidatesはJSON文字列などで保存できる。
+    candidatesにはJSON文字列などを保存できる。
     """
 
     now = utc_now_text()
@@ -977,7 +2004,7 @@ def add_review_item(
                 candidates,
                 now,
                 now,
-            )
+            ),
         )
 
         connection.commit()
@@ -990,7 +2017,7 @@ def complete_review_item(
     review_note: str = "",
 ) -> None:
     """
-    人間による判定を完了状態にする。
+    画像単位の確認待ちを完了状態にする。
     """
 
     now = utc_now_text()
@@ -1020,10 +2047,359 @@ def complete_review_item(
                 now,
                 now,
                 image_id,
-            )
+            ),
         )
 
         connection.commit()
+
+
+# =========================
+# 顔単位の確認待ち
+# =========================
+
+def add_face_review(
+    face_id: int,
+    question: str,
+    candidates: list[dict[str, Any]] | str,
+) -> None:
+    """
+    顔単位の確認待ちを登録する。
+
+    candidatesがリストの場合は、
+    JSON文字列へ自動変換する。
+    """
+
+    if isinstance(
+        candidates,
+        str,
+    ):
+
+        candidate_text = candidates
+
+    else:
+
+        candidate_text = json.dumps(
+            candidates,
+            ensure_ascii=False,
+        )
+
+    now = utc_now_text()
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            INSERT INTO photo_face_reviews (
+                face_id,
+                question,
+                candidates,
+                status,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, 'pending', ?, ?)
+
+            ON CONFLICT(face_id)
+            DO UPDATE SET
+                question = excluded.question,
+                candidates = excluded.candidates,
+                status = 'pending',
+                selected_person_id = NULL,
+                reviewed_by = '',
+                review_note = '',
+                reviewed_at = '',
+                updated_at = excluded.updated_at
+            """,
+            (
+                face_id,
+                question,
+                candidate_text,
+                now,
+                now,
+            ),
+        )
+
+        connection.commit()
+
+
+def complete_face_review(
+    face_id: int,
+    person_id: int,
+    reviewed_by: str = "",
+    review_note: str = "",
+) -> None:
+    """
+    顔の人物確認を完了し、
+    photo_faces側にも確定人物を保存する。
+    """
+
+    now = utc_now_text()
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            UPDATE photo_face_reviews
+
+            SET
+                status = 'completed',
+                selected_person_id = ?,
+                reviewed_by = ?,
+                review_note = ?,
+                reviewed_at = ?,
+                updated_at = ?
+
+            WHERE face_id = ?
+            """,
+            (
+                person_id,
+                reviewed_by,
+                review_note,
+                now,
+                now,
+                face_id,
+            ),
+        )
+
+        connection.execute(
+            """
+            UPDATE photo_faces
+
+            SET
+                confirmed_person_id = ?,
+                confirmation_status = 'manually_confirmed',
+                confirmed_by = ?,
+                confirmed_at = ?,
+                updated_at = ?
+
+            WHERE id = ?
+            """,
+            (
+                person_id,
+                reviewed_by,
+                now,
+                now,
+                face_id,
+            ),
+        )
+
+        connection.commit()
+
+
+def get_pending_face_reviews(
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    顔単位の未確認項目を取得する。
+    """
+
+    limit = max(
+        int(limit),
+        1,
+    )
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.execute(
+            """
+            SELECT
+                photo_face_reviews.*,
+
+                photo_faces.image_id,
+                photo_faces.face_index,
+                photo_faces.box_x,
+                photo_faces.box_y,
+                photo_faces.box_width,
+                photo_faces.box_height,
+
+                photo_images.local_path,
+                photo_images.image_url,
+
+                photo_blogs.blog_url,
+                photo_blogs.group_name,
+                photo_blogs.member_name,
+                photo_blogs.title,
+                photo_blogs.published_at
+
+            FROM photo_face_reviews
+
+            INNER JOIN photo_faces
+                ON photo_face_reviews.face_id
+                = photo_faces.id
+
+            INNER JOIN photo_images
+                ON photo_faces.image_id
+                = photo_images.id
+
+            INNER JOIN photo_blogs
+                ON photo_images.blog_id
+                = photo_blogs.id
+
+            WHERE
+                photo_face_reviews.status = 'pending'
+
+            ORDER BY
+                photo_face_reviews.id ASC
+
+            LIMIT ?
+            """,
+            (
+                limit,
+            ),
+        )
+
+        return rows_to_dicts(
+            cursor.fetchall()
+        )
+
+
+# =========================
+# 人物検索
+# =========================
+
+def search_images_by_person(
+    person_name: str,
+    limit: int = 20,
+    confirmed_only: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    画像内人物名から画像を検索する。
+
+    これにより、井上和のブログ内に写った
+    菅原咲月の写真も検索対象にできる。
+    """
+
+    person_name = str(
+        person_name
+    ).strip()
+
+    if not person_name:
+
+        return []
+
+    limit = max(
+        int(limit),
+        1,
+    )
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        if confirmed_only:
+
+            cursor = connection.execute(
+                """
+                SELECT DISTINCT
+                    photo_images.*,
+
+                    photo_blogs.blog_url,
+                    photo_blogs.group_name,
+                    photo_blogs.member_name,
+                    photo_blogs.title,
+                    photo_blogs.published_at,
+
+                    photo_people.person_name
+                        AS matched_person_name
+
+                FROM photo_faces
+
+                INNER JOIN photo_people
+                    ON photo_faces.confirmed_person_id
+                    = photo_people.id
+
+                INNER JOIN photo_images
+                    ON photo_faces.image_id
+                    = photo_images.id
+
+                INNER JOIN photo_blogs
+                    ON photo_images.blog_id
+                    = photo_blogs.id
+
+                WHERE
+                    photo_people.person_name = ?
+
+                AND
+                    photo_faces.confirmation_status
+                    IN (
+                        'confirmed',
+                        'auto_confirmed',
+                        'manually_confirmed'
+                    )
+
+                ORDER BY
+                    photo_blogs.published_at DESC,
+                    photo_images.image_index ASC
+
+                LIMIT ?
+                """,
+                (
+                    person_name,
+                    limit,
+                ),
+            )
+
+        else:
+
+            cursor = connection.execute(
+                """
+                SELECT DISTINCT
+                    photo_images.*,
+
+                    photo_blogs.blog_url,
+                    photo_blogs.group_name,
+                    photo_blogs.member_name,
+                    photo_blogs.title,
+                    photo_blogs.published_at,
+
+                    photo_people.person_name
+                        AS matched_person_name,
+
+                    photo_face_candidates.confidence
+                        AS match_confidence
+
+                FROM photo_face_candidates
+
+                INNER JOIN photo_people
+                    ON photo_face_candidates.person_id
+                    = photo_people.id
+
+                INNER JOIN photo_faces
+                    ON photo_face_candidates.face_id
+                    = photo_faces.id
+
+                INNER JOIN photo_images
+                    ON photo_faces.image_id
+                    = photo_images.id
+
+                INNER JOIN photo_blogs
+                    ON photo_images.blog_id
+                    = photo_blogs.id
+
+                WHERE
+                    photo_people.person_name = ?
+
+                ORDER BY
+                    photo_face_candidates.confidence DESC,
+                    photo_blogs.published_at DESC
+
+                LIMIT ?
+                """,
+                (
+                    person_name,
+                    limit,
+                ),
+            )
+
+        return rows_to_dicts(
+            cursor.fetchall()
+        )
 
 
 # =========================
@@ -1035,51 +2411,90 @@ def get_photo_db_counts() -> dict[str, int]:
     写真検索DB内の件数を返す。
     """
 
-    table_names = {
-        "blogs": "photo_blogs",
-        "images": "photo_images",
-        "ai_tags": "photo_ai_tags",
-        "manual_tags": "photo_manual_tags",
-        "pending_reviews": "photo_review_queue",
-        "favorites": "photo_favorites",
-    }
-
     counts: dict[str, int] = {}
 
     with closing(
         get_connection()
     ) as connection:
 
-        for key, table_name in table_names.items():
+        count_queries = {
+            "blogs": """
+                SELECT COUNT(*) AS count
+                FROM photo_blogs
+            """,
 
-            if key == "pending_reviews":
+            "images": """
+                SELECT COUNT(*) AS count
+                FROM photo_images
+            """,
 
-                cursor = connection.execute(
-                    """
-                    SELECT COUNT(*) AS count
-                    FROM photo_review_queue
-                    WHERE status = 'pending'
-                    """
-                )
+            "ai_tags": """
+                SELECT COUNT(*) AS count
+                FROM photo_ai_tags
+            """,
 
-            else:
+            "manual_tags": """
+                SELECT COUNT(*) AS count
+                FROM photo_manual_tags
+            """,
 
-                cursor = connection.execute(
-                    f"""
-                    SELECT COUNT(*) AS count
-                    FROM {table_name}
-                    """
-                )
+            "pending_reviews": """
+                SELECT COUNT(*) AS count
+                FROM photo_review_queue
+                WHERE status = 'pending'
+            """,
+
+            "favorites": """
+                SELECT COUNT(*) AS count
+                FROM photo_favorites
+            """,
+
+            "people": """
+                SELECT COUNT(*) AS count
+                FROM photo_people
+            """,
+
+            "faces": """
+                SELECT COUNT(*) AS count
+                FROM photo_faces
+            """,
+
+            "confirmed_faces": """
+                SELECT COUNT(*) AS count
+                FROM photo_faces
+                WHERE confirmed_person_id IS NOT NULL
+            """,
+
+            "face_candidates": """
+                SELECT COUNT(*) AS count
+                FROM photo_face_candidates
+            """,
+
+            "pending_face_reviews": """
+                SELECT COUNT(*) AS count
+                FROM photo_face_reviews
+                WHERE status = 'pending'
+            """,
+        }
+
+        for key, query in count_queries.items():
+
+            cursor = connection.execute(
+                query
+            )
 
             row = cursor.fetchone()
 
             counts[key] = (
-                int(row["count"])
+                int(
+                    row["count"]
+                )
                 if row
                 else 0
             )
 
     return counts
+
 
 # =========================
 # 画像保存状況
@@ -1099,7 +2514,7 @@ def get_photo_storage_stats() -> dict[str, int]:
         ダウンロード失敗件数
 
     total_size:
-        保存済み画像の合計容量（bytes）
+        保存済み画像の合計容量
     """
 
     with closing(
@@ -1161,19 +2576,28 @@ def get_photo_storage_stats() -> dict[str, int]:
 
     return {
         "total_images": int(
-            row["total_images"] or 0
+            row["total_images"]
+            or 0
         ),
+
         "completed": int(
-            row["completed"] or 0
+            row["completed"]
+            or 0
         ),
+
         "pending": int(
-            row["pending"] or 0
+            row["pending"]
+            or 0
         ),
+
         "failed": int(
-            row["failed"] or 0
+            row["failed"]
+            or 0
         ),
+
         "total_size": int(
-            row["total_size"] or 0
+            row["total_size"]
+            or 0
         ),
     }
 
@@ -1188,18 +2612,21 @@ if __name__ == "__main__":
 
     counts = get_photo_db_counts()
 
-    print("=" * 40)
+    print("=" * 50)
     print("写真検索DB状態")
     print(f"ブログ: {counts['blogs']}件")
     print(f"画像: {counts['images']}件")
     print(f"AIタグ: {counts['ai_tags']}件")
     print(f"手動タグ: {counts['manual_tags']}件")
+    print(f"画像確認待ち: {counts['pending_reviews']}件")
+    print(f"お気に入り: {counts['favorites']}件")
+    print("-" * 50)
+    print(f"人物マスター: {counts['people']}人")
+    print(f"検出された顔: {counts['faces']}件")
+    print(f"人物確定済みの顔: {counts['confirmed_faces']}件")
+    print(f"人物候補: {counts['face_candidates']}件")
     print(
-        f"確認待ち: "
-        f"{counts['pending_reviews']}件"
+        "顔確認待ち:",
+        f"{counts['pending_face_reviews']}件",
     )
-    print(
-        f"お気に入り: "
-        f"{counts['favorites']}件"
-    )
-    print("=" * 40)
+    print("=" * 50)
