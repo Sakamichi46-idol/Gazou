@@ -1,43 +1,29 @@
-import asyncio
 import os
-from typing import Any
-
+import shutil
+import asyncio
 import aiohttp
+
 import discord
 from discord.ext import commands, tasks
 
 from archive_checker import get_archive_targets
-from archive_config import (
-    ARCHIVE_INTERVAL,
-    SEND_DELAY,
-)
 from archive_database import (
-    archive_count,
     init_archive_db,
-    reset_archive,
-    save_archive,
+    save_archive
 )
 from archive_image_getter import get_images
-from archive_media import download_attachment
-from archive_parsers.utils import normalize_member_name
-
-from photo_ai_analyzer import (
-    analyze_pending_images,
-    analyze_photo_image,
-    get_photo_ai_status,
-)
-from photo_database import (
-    get_photo_db_counts,
-    get_photo_storage_stats,
-    init_photo_db,
-    save_photo_blog,
-    save_photo_images,
-)
-from photo_image_downloader import (
-    download_blog_images,
-    get_photo_storage_path,
+from archive_config import (
+    ARCHIVE_INTERVAL,
+    SEND_DELAY
 )
 
+from archive_media import (
+    download_attachment
+)
+
+from archive_parsers.utils import (
+    normalize_member_name
+)
 
 # =========================
 # Discord設定
@@ -295,906 +281,126 @@ ARCHIVE_MEMBER_CHANNELS = {
 
 }
 
-
-# =========================
-# 共通設定
-# =========================
-
-PHOTO_AI_AUTO_ANALYZE = (
-    os.getenv(
-        "PHOTO_AI_AUTO_ANALYZE",
-        "true",
-    )
-    .strip()
-    .lower()
-    in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-)
-
-PHOTO_AI_AUTO_LIMIT = max(
-    int(
-        os.getenv(
-            "PHOTO_AI_AUTO_LIMIT",
-            "20",
-        )
-    ),
-    1,
-)
-
-DISCORD_FILE_MARGIN = 512 * 1024
-DEFAULT_UPLOAD_LIMIT = 8 * 1024 * 1024
-MAX_FILES_PER_MESSAGE = 10
-FAILED_URL_MESSAGE_LIMIT = 1900
-
-archive_cycle_lock = asyncio.Lock()
-startup_initialized = False
-
-
-# =========================
-# 補助関数
-# =========================
-
-def format_bytes(
-    size: int,
-) -> str:
-    """
-    バイト数を読みやすい単位へ変換する。
-    """
-
-    value = float(
-        max(
-            int(size),
-            0,
-        )
-    )
-
-    units = [
-        "B",
-        "KB",
-        "MB",
-        "GB",
-        "TB",
-    ]
-
-    for unit in units:
-
-        if (
-            value < 1024
-            or unit == units[-1]
-        ):
-
-            if unit == "B":
-                return f"{int(value)} {unit}"
-
-            return f"{value:.2f} {unit}"
-
-        value /= 1024
-
-    return f"{int(size)} B"
-
-
-def safe_int(
-    value: Any,
-    default: int = 0,
-) -> int:
-    """
-    値を安全に整数へ変換する。
-    """
-
-    try:
-        return int(
-            value
-        )
-
-    except (
-        TypeError,
-        ValueError,
-    ):
-        return default
-
-
-def get_channel_upload_limit(
-    channel: discord.abc.Messageable,
-) -> int:
-    """
-    Discordチャンネルの添付上限を取得する。
-    """
-
-    guild = getattr(
-        channel,
-        "guild",
-        None,
-    )
-
-    if guild:
-
-        limit = safe_int(
-            getattr(
-                guild,
-                "filesize_limit",
-                0,
-            )
-        )
-
-        if limit > 0:
-            return limit
-
-    return DEFAULT_UPLOAD_LIMIT
-
-
-def close_discord_files(
-    attachments: list[dict[str, Any]],
-) -> None:
-    """
-    discord.Fileが保持するファイルを安全に閉じる。
-    """
-
-    for attachment in attachments:
-
-        file = attachment.get(
-            "file"
-        )
-
-        if not file:
-            continue
-
-        try:
-            file.close()
-
-        except Exception:
-            pass
-
-
-def build_file_groups(
-    attachments: list[dict[str, Any]],
-    upload_limit: int,
-) -> list[list[dict[str, Any]]]:
-    """
-    添付をDiscordの件数上限・容量上限内に分割する。
-    """
-
-    groups: list[
-        list[dict[str, Any]]
-    ] = []
-
-    current_group: list[
-        dict[str, Any]
-    ] = []
-
-    current_size = 0
-
-    group_size_limit = max(
-        upload_limit
-        - DISCORD_FILE_MARGIN,
-        1 * 1024 * 1024,
-    )
-
-    for attachment in attachments:
-
-        attachment_size = max(
-            safe_int(
-                attachment.get(
-                    "size",
-                    0,
-                )
-            ),
-            0,
-        )
-
-        should_split = (
-            len(
-                current_group
-            )
-            >= MAX_FILES_PER_MESSAGE
-            or (
-                bool(
-                    current_group
-                )
-                and (
-                    current_size
-                    + attachment_size
-                    > group_size_limit
-                )
-            )
-        )
-
-        if should_split:
-
-            groups.append(
-                current_group
-            )
-
-            current_group = []
-            current_size = 0
-
-        current_group.append(
-            attachment
-        )
-
-        current_size += (
-            attachment_size
-        )
-
-    if current_group:
-
-        groups.append(
-            current_group
-        )
-
-    return groups
-
-
-async def send_failed_urls(
-    channel: discord.abc.Messageable,
-    failed_urls: list[str],
-) -> None:
-    """
-    添付できなかった画像URLをDiscordへ送信する。
-    """
-
-    if not failed_urls:
-        return
-
-    unique_urls = list(
-        dict.fromkeys(
-            str(url)
-            for url in failed_urls
-            if str(url).strip()
-        )
-    )
-
-    if not unique_urls:
-        return
-
-    heading = (
-        "⚠️ 容量または変換エラーのため、"
-        "添付できなかった画像です。\n"
-    )
-
-    current_message = heading
-
-    for failed_url in unique_urls:
-
-        line = (
-            f"・{failed_url}\n"
-        )
-
-        if (
-            len(
-                current_message
-            )
-            + len(
-                line
-            )
-            > FAILED_URL_MESSAGE_LIMIT
-        ):
-
-            await channel.send(
-                current_message.rstrip(),
-                suppress_embeds=True,
-            )
-
-            await asyncio.sleep(
-                SEND_DELAY
-            )
-
-            current_message = heading
-
-        current_message += line
-
-    if current_message != heading:
-
-        await channel.send(
-            current_message.rstrip(),
-            suppress_embeds=True,
-        )
-
-        await asyncio.sleep(
-            SEND_DELAY
-        )
-
-
-def build_archive_embed(
-    blog: dict[str, Any],
-    image_count: int,
-) -> discord.Embed:
-    """
-    ブログ通知用Embedを作成する。
-    """
-
-    blog_url = str(
-        blog.get(
-            "url",
-            "",
-        )
-    ).strip()
-
-    embed = discord.Embed(
-        title=(
-            blog.get(
-                "title"
-            )
-            or "無題"
-        ),
-        url=blog_url or None,
-        color=0x00AAFF,
-    )
-
-    embed.add_field(
-        name="🏷️ グループ",
-        value=(
-            blog.get(
-                "group"
-            )
-            or "不明"
-        ),
-        inline=True,
-    )
-
-    embed.add_field(
-        name="👤 メンバー",
-        value=(
-            blog.get(
-                "member"
-            )
-            or "不明"
-        ),
-        inline=True,
-    )
-
-    embed.add_field(
-        name="📅 投稿日時",
-        value=(
-            blog.get(
-                "date"
-            )
-            or "不明"
-        ),
-        inline=False,
-    )
-
-    embed.set_footer(
-        text=(
-            "Archive BOT"
-            f" • 画像総数 {image_count}枚"
-        )
-    )
-
-    return embed
-
-
 # =========================
 # 投稿先取得
 # =========================
 
-def get_channels(
-    blog: dict[str, Any],
-) -> list[
-    discord.abc.Messageable
-]:
-    """
-    全体・グループ・メンバー別の送信先を重複なしで返す。
-    """
+def get_channels(blog):
 
-    channels: list[
-        discord.abc.Messageable
-    ] = []
+    channels = []
+    seen = set()
 
-    seen: set[int] = set()
+    # -------------------------
+    # 1. 全体チャンネル
+    # -------------------------
 
-    channel_ids: list[
-        tuple[str, int | None]
-    ] = [
-        (
-            "全体",
-            ARCHIVE_ALL_CHANNEL,
-        ),
-    ]
+    if ARCHIVE_ALL_CHANNEL:
 
-    group = str(
-        blog.get(
-            "group",
-            "",
+        channel = bot.get_channel(
+            ARCHIVE_ALL_CHANNEL
         )
-    ).strip()
 
-    channel_ids.append(
-        (
-            f"グループ:{group}",
-            ARCHIVE_GROUP_CHANNELS.get(
-                group
-            ),
-        )
+        if channel:
+
+            channels.append(
+                channel
+            )
+
+            seen.add(
+                channel.id
+            )
+
+
+    # -------------------------
+    # 2. グループチャンネル
+    # -------------------------
+
+    group = blog.get(
+        "group",
+        ""
     )
+
+    group_channel_id = ARCHIVE_GROUP_CHANNELS.get(
+        group
+    )
+
+    if group_channel_id:
+
+        channel = bot.get_channel(
+            group_channel_id
+        )
+
+        if (
+            channel
+            and channel.id not in seen
+        ):
+
+            channels.append(
+                channel
+            )
+
+            seen.add(
+                channel.id
+            )
+
+
+    # -------------------------
+    # 3. メンバーチャンネル
+    # -------------------------
 
     member = normalize_member_name(
         blog.get(
             "member",
-            "",
+            ""
         )
     )
 
-    channel_ids.append(
-        (
-            f"メンバー:{member}",
-            ARCHIVE_MEMBER_CHANNELS.get(
-                member
-            ),
-        )
+    member_channel_id = ARCHIVE_MEMBER_CHANNELS.get(
+        member
     )
 
-    for label, channel_id in channel_ids:
-
-        if not channel_id:
-            continue
+    if member_channel_id:
 
         channel = bot.get_channel(
-            int(
-                channel_id
-            )
-        )
-
-        if not channel:
-
-            print(
-                "送信先チャンネル取得失敗:",
-                label,
-                channel_id,
-            )
-
-            continue
-
-        channel_real_id = safe_int(
-            getattr(
-                channel,
-                "id",
-                0,
-            )
+            member_channel_id
         )
 
         if (
-            channel_real_id <= 0
-            or channel_real_id in seen
-        ):
-            continue
-
-        channels.append(
             channel
-        )
+            and channel.id not in seen
+        ):
 
-        seen.add(
-            channel_real_id
-        )
+            channels.append(
+                channel
+            )
 
-    if (
-        member
-        and member
-        not in ARCHIVE_MEMBER_CHANNELS
-    ):
+            seen.add(
+                channel.id
+            )
+
+            print(
+                f"メンバー別チャンネル取得成功: "
+                f"{member} / {channel.id}"
+            )
+
+        else:
+
+            print(
+                f"メンバー別チャンネル取得失敗: "
+                f"{member} / {member_channel_id}"
+            )
+
+    else:
 
         print(
             "メンバー別チャンネル未設定:",
-            repr(
-                member
-            ),
+            repr(member)
         )
+
 
     return channels
 
 
-# =========================
-# 写真DB・AI処理
-# =========================
-
-async def archive_photos_and_analyze(
-    session: aiohttp.ClientSession,
-    blog: dict[str, Any],
-    image_urls: list[str],
-) -> dict[str, Any]:
-    """
-    記事・画像URLを写真DBへ登録し、
-    Railway Volumeへ保存してAI解析する。
-
-    この処理の失敗でDiscordアーカイブ全体は止めない。
-    """
-
-    result: dict[str, Any] = {
-        "blog_id": 0,
-        "registered": 0,
-        "downloaded": 0,
-        "download_failed": 0,
-        "analyzed": 0,
-        "analysis_review": 0,
-        "analysis_failed": 0,
-    }
-
-    if not image_urls:
-
-        return result
-
-    try:
-
-        blog_id = await asyncio.to_thread(
-            save_photo_blog,
-            blog,
-        )
-
-        image_records = await asyncio.to_thread(
-            save_photo_images,
-            blog_id,
-            image_urls,
-        )
-
-        result[
-            "blog_id"
-        ] = blog_id
-
-        result[
-            "registered"
-        ] = len(
-            image_records
-        )
-
-    except Exception as error:
-
-        print(
-            "写真DB登録エラー:",
-            blog.get(
-                "url",
-                "",
-            ),
-            error,
-        )
-
-        return result
-
-    try:
-
-        download_result = (
-            await download_blog_images(
-                session,
-                blog_id=blog_id,
-                blog=blog,
-                image_records=image_records,
-            )
-        )
-
-        result[
-            "downloaded"
-        ] = safe_int(
-            download_result.get(
-                "success",
-                0,
-            )
-        )
-
-        result[
-            "download_failed"
-        ] = safe_int(
-            download_result.get(
-                "failed",
-                0,
-            )
-        )
-
-    except Exception as error:
-
-        print(
-            "写真画像一括保存エラー:",
-            blog.get(
-                "url",
-                "",
-            ),
-            error,
-        )
-
-        return result
-
-    if not PHOTO_AI_AUTO_ANALYZE:
-
-        print(
-            "写真AI自動解析は無効です。"
-        )
-
-        return result
-
-    ai_status = get_photo_ai_status()
-
-    if not ai_status.get(
-        "enabled"
-    ):
-
-        print(
-            "OPENAI_API_KEY未設定のため、"
-            "AI解析をスキップします。"
-        )
-
-        return result
-
-    downloaded_ids = [
-        safe_int(
-            item.get(
-                "image_id",
-                0,
-            )
-        )
-        for item in download_result.get(
-            "results",
-            []
-        )
-        if item.get(
-            "success"
-        )
-    ]
-
-    for image_id in downloaded_ids:
-
-        if image_id <= 0:
-            continue
-
-        try:
-
-            analysis = await analyze_photo_image(
-                image_id
-            )
-
-            status = str(
-                analysis.get(
-                    "status",
-                    "",
-                )
-            )
-
-            if status == "completed":
-
-                result[
-                    "analyzed"
-                ] += 1
-
-            elif status == "review":
-
-                result[
-                    "analysis_review"
-                ] += 1
-
-            else:
-
-                result[
-                    "analysis_failed"
-                ] += 1
-
-        except Exception as error:
-
-            result[
-                "analysis_failed"
-            ] += 1
-
-            print(
-                "写真AI解析エラー:",
-                image_id,
-                error,
-            )
-
-    print(
-        "写真保存・AI解析結果:",
-        result,
-    )
-
-    return result
-
-
-# =========================
-# Discord送信
-# =========================
-
-async def prepare_attachments(
-    session: aiohttp.ClientSession,
-    image_urls: list[str],
-    upload_limit: int,
-) -> tuple[
-    list[dict[str, Any]],
-    list[str],
-]:
-    """
-    Discord添付用画像を準備する。
-    """
-
-    attachments: list[
-        dict[str, Any]
-    ] = []
-
-    failed_urls: list[str] = []
-
-    for image_index, image_url in enumerate(
-        image_urls,
-        start=1,
-    ):
-
-        try:
-
-            attachment = await download_attachment(
-                session,
-                image_url,
-                image_index,
-                upload_limit,
-            )
-
-        except Exception as error:
-
-            print(
-                "Discord添付準備エラー:",
-                image_url,
-                error,
-            )
-
-            failed_urls.append(
-                image_url
-            )
-
-            continue
-
-        if not attachment:
-
-            failed_urls.append(
-                image_url
-            )
-
-            continue
-
-        file = attachment.get(
-            "file"
-        )
-
-        if not file:
-
-            reason = attachment.get(
-                "reason",
-                "送信できませんでした。",
-            )
-
-            print(
-                "画像送信対象外:",
-                reason,
-                image_url,
-            )
-
-            failed_urls.append(
-                image_url
-            )
-
-            continue
-
-        attachments.append(
-            {
-                "file": file,
-                "size": attachment.get(
-                    "size",
-                    0,
-                ),
-                "url": image_url,
-            }
-        )
-
-    return (
-        attachments,
-        failed_urls,
-    )
-
-
-async def send_blog_to_channel(
-    session: aiohttp.ClientSession,
-    channel: discord.abc.Messageable,
-    embed: discord.Embed,
-    image_urls: list[str],
-) -> bool:
-    """
-    1チャンネルへEmbedと画像を送信する。
-    """
-
-    attachments: list[
-        dict[str, Any]
-    ] = []
-
-    failed_urls: list[str] = []
-
-    try:
-
-        await channel.send(
-            embed=embed
-        )
-
-        await asyncio.sleep(
-            SEND_DELAY
-        )
-
-        if not image_urls:
-            return True
-
-        upload_limit = (
-            get_channel_upload_limit(
-                channel
-            )
-        )
-
-        attachments, failed_urls = (
-            await prepare_attachments(
-                session,
-                image_urls,
-                upload_limit,
-            )
-        )
-
-        groups = build_file_groups(
-            attachments,
-            upload_limit,
-        )
-
-        for group in groups:
-
-            try:
-
-                await channel.send(
-                    files=[
-                        item[
-                            "file"
-                        ]
-                        for item in group
-                    ]
-                )
-
-                await asyncio.sleep(
-                    SEND_DELAY
-                )
-
-            except Exception as error:
-
-                print(
-                    "添付まとめ送信エラー:",
-                    getattr(
-                        channel,
-                        "id",
-                        "unknown",
-                    ),
-                    error,
-                )
-
-                failed_urls.extend(
-                    item[
-                        "url"
-                    ]
-                    for item in group
-                )
-
-        await send_failed_urls(
-            channel,
-            failed_urls,
-        )
-
-        return True
-
-    except Exception as error:
-
-        print(
-            "チャンネル送信エラー:",
-            getattr(
-                channel,
-                "id",
-                "unknown",
-            ),
-            error,
-        )
-
-        return False
-
-    finally:
-
-        close_discord_files(
-            attachments
-        )
 
 
 # =========================
@@ -1202,116 +408,32 @@ async def send_blog_to_channel(
 # =========================
 
 @bot.event
-async def on_ready() -> None:
+async def on_ready():
 
-    global startup_initialized
+    print("=" * 40)
+    print(f"ログイン成功: {bot.user}")
 
-    print(
-        "=" * 50
-    )
+    init_archive_db()
 
-    print(
-        f"ログイン成功: {bot.user}"
-    )
-
-    if not startup_initialized:
-
-        try:
-
-            await asyncio.to_thread(
-                init_archive_db
-            )
-
-            print(
-                "アーカイブDB初期化完了"
-            )
-
-        except Exception as error:
-
-            print(
-                "アーカイブDB初期化エラー:",
-                error,
-            )
-
-        try:
-
-            await asyncio.to_thread(
-                init_photo_db
-            )
-
-            print(
-                "写真検索DB初期化完了"
-            )
-
-        except Exception as error:
-
-            print(
-                "写真検索DB初期化エラー:",
-                error,
-            )
-
-        startup_initialized = True
-
-    ai_status = get_photo_ai_status()
+    print("アーカイブDB初期化完了")
 
     print(
-        "保存済みチェック間隔:",
-        f"{ARCHIVE_INTERVAL}秒",
+        f"保存済みチェック間隔: "
+        f"{ARCHIVE_INTERVAL}秒"
     )
 
-    print(
-        "写真保存先:",
-        get_photo_storage_path(),
-    )
+    print("!archive_start で開始")
 
-    print(
-        "AI解析:",
-        (
-            "有効"
-            if ai_status.get(
-                "enabled"
-            )
-            else "無効"
-        ),
-    )
-
-    print(
-        "AIモデル:",
-        ai_status.get(
-            "model",
-            "不明",
-        ),
-    )
-
-    print(
-        "AI自動解析:",
-        (
-            "有効"
-            if PHOTO_AI_AUTO_ANALYZE
-            else "無効"
-        ),
-    )
-
-    print(
-        "!archive_start で開始"
-    )
-
-    print(
-        "=" * 50
-    )
+    print("=" * 40)
 
 
 # =========================
-# アーカイブ操作コマンド
+# 開始コマンド
 # =========================
 
-@bot.command(
-    name="archive_start"
-)
+@bot.command()
 @commands.is_owner()
-async def archive_start(
-    ctx: commands.Context,
-) -> None:
+async def archive_start(ctx):
 
     if archive_loop.is_running():
 
@@ -1321,24 +443,27 @@ async def archive_start(
 
         return
 
+
     archive_loop.start()
+
 
     await ctx.send(
         "▶️ ブログアーカイブを開始しました。"
     )
+
 
     print(
         "アーカイブ巡回を開始しました。"
     )
 
 
-@bot.command(
-    name="archive_stop"
-)
+# =========================
+# 停止コマンド
+# =========================
+
+@bot.command()
 @commands.is_owner()
-async def archive_stop(
-    ctx: commands.Context,
-) -> None:
+async def archive_stop(ctx):
 
     if not archive_loop.is_running():
 
@@ -1348,608 +473,516 @@ async def archive_stop(
 
         return
 
+
     archive_loop.cancel()
+
 
     await ctx.send(
         "🛑 ブログアーカイブを停止しました。"
     )
+
 
     print(
         "アーカイブ巡回を停止しました。"
     )
 
 
-@bot.command(
-    name="archive_reset"
-)
+# =========================
+# DBリセット
+# =========================
+
+@bot.command()
 @commands.is_owner()
-async def archive_reset(
-    ctx: commands.Context,
-) -> None:
-    """
-    通知済み判定だけをリセットする。
+async def archive_reset(ctx):
 
-    写真DBとRailway Volume内の画像は削除しない。
-    """
+    # 巡回中なら、先に停止
+    was_running = archive_loop.is_running()
 
-    was_running = (
-        archive_loop.is_running()
-    )
 
     if was_running:
 
         archive_loop.cancel()
 
+
     try:
 
-        await asyncio.to_thread(
-            reset_archive
+        if os.path.exists("data"):
+
+            shutil.rmtree(
+                "data"
+            )
+
+
+        os.makedirs(
+            "data",
+            exist_ok=True
         )
+
+
+        init_archive_db()
+
 
         await ctx.send(
-            "🧹 アーカイブの通知済み履歴をリセットしました。\n"
-            "写真DBと保存画像は削除していません。"
+            "🧹 アーカイブDBをリセットしました。"
         )
+
 
         print(
-            "アーカイブ通知済み履歴をリセットしました。"
+            "アーカイブDBをリセットしました。"
         )
 
-    except Exception as error:
+
+    except Exception as e:
 
         print(
             "アーカイブDBリセットエラー:",
-            error,
+            e
         )
+
 
         await ctx.send(
-            "⚠️ DBリセットに失敗しました。\n"
-            f"`{error}`"
+            f"⚠️ DBリセットに失敗しました。\n`{e}`"
         )
 
+
+    # リセット前に動作中だった場合だけ再開
     if was_running:
 
         archive_loop.start()
+
 
         await ctx.send(
             "▶️ アーカイブ巡回を再開しました。"
         )
 
 
-@bot.command(
-    name="archive_count"
-)
-@commands.is_owner()
-async def archive_count_command(
-    ctx: commands.Context,
-) -> None:
-
-    count = await asyncio.to_thread(
-        archive_count
-    )
-
-    await ctx.send(
-        "📦 現在のアーカイブ件数: "
-        f"**{count}件**"
-    )
-
-
-@bot.command(
-    name="archive_run"
-)
-@commands.is_owner()
-async def archive_run_once(
-    ctx: commands.Context,
-) -> None:
-
-    if archive_cycle_lock.locked():
-
-        await ctx.send(
-            "⚠️ 現在アーカイブ処理中です。"
-        )
-
-        return
-
-    await ctx.send(
-        "🔄 アーカイブを1回実行します。"
-    )
-
-    await run_archive_cycle()
-
-    await ctx.send(
-        "✅ アーカイブの1回実行が完了しました。"
-    )
-
-
 # =========================
-# 写真DB・AIコマンド
+# DB件数確認
 # =========================
 
-@bot.command(
-    name="photo_count"
-)
+@bot.command()
 @commands.is_owner()
-async def photo_count_command(
-    ctx: commands.Context,
-) -> None:
+async def archive_count_command(ctx):
 
-    counts = await asyncio.to_thread(
-        get_photo_db_counts
-    )
+    from archive_database import archive_count
 
-    message = (
-        "📷 **写真検索DB件数**\n"
-        f"ブログ: **{counts.get('blogs', 0)}件**\n"
-        f"画像: **{counts.get('images', 0)}件**\n"
-        f"AIタグ: **{counts.get('ai_tags', 0)}件**\n"
-        f"手動タグ: **{counts.get('manual_tags', 0)}件**\n"
-        f"人物: **{counts.get('people', 0)}件**\n"
-        f"顔: **{counts.get('faces', 0)}件**\n"
-        f"確認待ち: **{counts.get('pending_reviews', 0)}件**\n"
-        f"顔確認待ち: **{counts.get('pending_face_reviews', 0)}件**"
-    )
+
+    count = archive_count()
+
 
     await ctx.send(
-        message
+        f"📦 現在のアーカイブ件数: **{count}件**"
     )
 
-
-@bot.command(
-    name="photo_storage"
-)
-@commands.is_owner()
-async def photo_storage_command(
-    ctx: commands.Context,
-) -> None:
-
-    stats = await asyncio.to_thread(
-        get_photo_storage_stats
-    )
-
-    storage_path = get_photo_storage_path()
-
-    await ctx.send(
-        "💾 **写真保存状況**\n"
-        f"保存先: `{storage_path}`\n"
-        f"画像総数: **{stats.get('total_images', 0)}件**\n"
-        f"保存完了: **{stats.get('completed', 0)}件**\n"
-        f"保存待ち: **{stats.get('pending', 0)}件**\n"
-        f"保存失敗: **{stats.get('failed', 0)}件**\n"
-        "合計容量: "
-        f"**{format_bytes(stats.get('total_size', 0))}**"
-    )
-
-
-@bot.command(
-    name="ai_status"
-)
-@commands.is_owner()
-async def ai_status_command(
-    ctx: commands.Context,
-) -> None:
-
-    status = get_photo_ai_status()
-
-    await ctx.send(
-        "🤖 **写真AI解析設定**\n"
-        "APIキー: "
-        f"**{'設定済み' if status.get('enabled') else '未設定'}**\n"
-        f"モデル: **{status.get('model', '不明')}**\n"
-        f"画像詳細度: **{status.get('detail', '不明')}**\n"
-        f"一括件数: **{status.get('batch_limit', 0)}件**\n"
-        "自動解析: "
-        f"**{'有効' if PHOTO_AI_AUTO_ANALYZE else '無効'}**\n"
-        f"自動解析上限: **{PHOTO_AI_AUTO_LIMIT}件**"
-    )
-
-
-@bot.command(
-    name="ai_analyze"
-)
-@commands.is_owner()
-async def ai_analyze_command(
-    ctx: commands.Context,
-    limit: int | None = None,
-) -> None:
-
-    status = get_photo_ai_status()
-
-    if not status.get(
-        "enabled"
-    ):
-
-        await ctx.send(
-            "⚠️ OPENAI_API_KEYが設定されていません。"
-        )
-
-        return
-
-    if limit is not None:
-
-        limit = max(
-            min(
-                int(limit),
-                100,
-            ),
-            1,
-        )
-
-    await ctx.send(
-        "🤖 未解析画像のAI解析を開始します。"
-    )
-
-    try:
-
-        result = await analyze_pending_images(
-            limit
-        )
-
-    except Exception as error:
-
-        print(
-            "AI一括解析エラー:",
-            error,
-        )
-
-        await ctx.send(
-            "⚠️ AI解析に失敗しました。\n"
-            f"`{error}`"
-        )
-
-        return
-
-    await ctx.send(
-        "✅ **AI解析完了**\n"
-        f"検出: **{result.get('found', 0)}件**\n"
-        f"完了: **{result.get('completed', 0)}件**\n"
-        f"確認待ち: **{result.get('review', 0)}件**\n"
-        f"失敗: **{result.get('failed', 0)}件**"
-    )
 
 
 # =========================
 # アーカイブ本体
 # =========================
 
-async def run_archive_cycle() -> None:
-    """
-    未アーカイブ記事を取得して順番に処理する。
-    """
-
-    if archive_cycle_lock.locked():
-
-        print(
-            "前回のアーカイブ処理が継続中のため、"
-            "今回の巡回をスキップします。"
-        )
-
-        return
-
-    async with archive_cycle_lock:
-
-        print(
-            "=" * 50
-        )
-
-        print(
-            "アーカイブ巡回を開始します。"
-        )
-
-        try:
-
-            blogs = await get_archive_targets()
-
-        except Exception as error:
-
-            print(
-                "ブログ一覧取得エラー:",
-                error,
-            )
-
-            return
-
-        if not blogs:
-
-            print(
-                "未アーカイブの記事はありません。"
-            )
-
-            return
-
-        print(
-            "今回の処理対象:",
-            f"{len(blogs)}件",
-        )
-
-        timeout = aiohttp.ClientTimeout(
-            total=120
-        )
-
-        connector = aiohttp.TCPConnector(
-            limit=10,
-            ttl_dns_cache=300,
-        )
-
-        async with aiohttp.ClientSession(
-            timeout=timeout,
-            connector=connector,
-        ) as session:
-
-            for index, blog in enumerate(
-                blogs,
-                start=1,
-            ):
-
-                await process_archive_blog(
-                    session,
-                    blog,
-                    index,
-                    len(
-                        blogs
-                    ),
-                )
-
-                await asyncio.sleep(
-                    SEND_DELAY
-                )
-
-        print(
-            "=" * 50
-        )
-
-        print(
-            "今回のアーカイブ巡回が完了しました。"
-        )
-
-
-async def process_archive_blog(
-    session: aiohttp.ClientSession,
-    blog: dict[str, Any],
-    index: int,
-    total: int,
-) -> None:
-    """
-    ブログ1件を処理する。
-    """
-
-    blog_url = str(
-        blog.get(
-            "url",
-            "",
-        )
-    ).strip()
-
-    print(
-        "-" * 50
-    )
-
-    print(
-        f"処理中 {index}/{total}"
-    )
-
-    print(
-        "グループ:",
-        blog.get(
-            "group",
-            "不明",
-        ),
-    )
-
-    print(
-        "メンバー:",
-        blog.get(
-            "member",
-            "不明",
-        ),
-    )
-
-    print(
-        "日時:",
-        blog.get(
-            "date",
-            "不明",
-        ),
-    )
-
-    print(
-        "URL:",
-        blog_url,
-    )
-
-    if not blog_url:
-
-        print(
-            "URLが空のためスキップします。"
-        )
-
-        return
-
-    try:
-
-        channels = get_channels(
-            blog
-        )
-
-        if not channels:
-
-            print(
-                "送信先チャンネルがありません。"
-            )
-
-            return
-
-        try:
-
-            image_urls = await get_images(
-                blog_url
-            )
-
-        except Exception as error:
-
-            print(
-                "記事画像URL取得エラー:",
-                blog_url,
-                error,
-            )
-
-            image_urls = []
-
-        image_urls = list(
-            dict.fromkeys(
-                str(url).strip()
-                for url in (
-                    image_urls
-                    or []
-                )
-                if str(url).strip()
-            )
-        )
-
-        print(
-            "取得画像数:",
-            len(
-                image_urls
-            ),
-        )
-
-        # 写真DB保存とAI解析はDiscord送信とは独立して実行する。
-        # 失敗しても通常アーカイブ通知は続行する。
-        await archive_photos_and_analyze(
-            session,
-            blog,
-            image_urls,
-        )
-
-        embed = build_archive_embed(
-            blog,
-            len(
-                image_urls
-            ),
-        )
-
-        send_results: list[
-            bool
-        ] = []
-
-        for channel in channels:
-
-            succeeded = await send_blog_to_channel(
-                session,
-                channel,
-                embed,
-                image_urls,
-            )
-
-            send_results.append(
-                succeeded
-            )
-
-        if (
-            send_results
-            and all(
-                send_results
-            )
-        ):
-
-            await asyncio.to_thread(
-                save_archive,
-                blog,
-            )
-
-            print(
-                "アーカイブ保存完了:",
-                blog_url,
-            )
-
-        else:
-
-            print(
-                "一部の送信に失敗したため、"
-                "通知済みDBには保存しませんでした。"
-            )
-
-    except Exception as error:
-
-        print(
-            "アーカイブ処理エラー:",
-            blog_url,
-            error,
-        )
-
-
 @tasks.loop(
     seconds=ARCHIVE_INTERVAL
 )
-async def archive_loop() -> None:
+async def archive_loop():
 
-    await run_archive_cycle()
+    print("=" * 50)
+    print("アーカイブ巡回を開始します。")
 
+    try:
+
+        blogs = await get_archive_targets()
+
+    except Exception as e:
+
+        print(
+            "ブログ一覧取得エラー:",
+            e
+        )
+
+        return
+
+
+    if not blogs:
+
+        print(
+            "未アーカイブの記事はありません。"
+        )
+
+        return
+
+
+    print(
+        f"今回の処理対象: {len(blogs)}件"
+    )
+
+
+    async with aiohttp.ClientSession() as session:
+
+        for index, blog in enumerate(
+            blogs,
+            start=1
+        ):
+
+            blog_url = blog.get(
+                "url",
+                ""
+            )
+
+            print("-" * 50)
+
+            print(
+                f"処理中 {index}/{len(blogs)}"
+            )
+
+            print(
+                f"グループ: {blog.get('group', '不明')}"
+            )
+
+            print(
+                f"メンバー: {blog.get('member', '不明')}"
+            )
+
+            print(
+                f"日時: {blog.get('date', '不明')}"
+            )
+
+            print(
+                f"URL: {blog_url}"
+            )
+
+
+            if not blog_url:
+
+                print(
+                    "URLが空のためスキップします。"
+                )
+
+                continue
+
+
+            try:
+
+                channels = get_channels(
+                    blog
+                )
+
+
+                if not channels:
+
+                    print(
+                        "送信先チャンネルがありません。"
+                    )
+
+                    continue
+
+
+                # =====================
+                # 記事画像URL取得
+                # =====================
+
+                image_urls = await get_images(
+                    blog_url
+                )
+
+
+                if not image_urls:
+
+                    image_urls = []
+
+
+                print(
+                    f"取得画像数: {len(image_urls)}"
+                )
+
+
+                # =====================
+                # Embed作成
+                # =====================
+
+                embed = discord.Embed(
+
+                    title=blog.get(
+                        "title"
+                    ) or "無題",
+
+                    url=blog_url,
+
+                    color=0x00AAFF
+
+                )
+
+
+                embed.add_field(
+
+                    name="🏷️ グループ",
+
+                    value=blog.get(
+                        "group"
+                    ) or "不明",
+
+                    inline=True
+
+                )
+
+
+                embed.add_field(
+
+                    name="👤 メンバー",
+
+                    value=blog.get(
+                        "member"
+                    ) or "不明",
+
+                    inline=True
+
+                )
+
+
+                embed.add_field(
+
+                    name="📅 投稿日時",
+
+                    value=blog.get(
+                        "date"
+                    ) or "不明",
+
+                    inline=False
+
+                )
+
+
+                embed.set_footer(
+
+                    text=(
+                        "Archive BOT"
+                        f" • 画像総数 {len(image_urls)}枚"
+                    )
+
+                )
+
+
+                # 全送信先への送信が成功したか
+                send_succeeded = True
+
+
+                # =====================
+                # チャンネルごとに送信
+                # =====================
+
+                for channel in channels:
+
+                    try:
+
+                        await channel.send(
+                            embed=embed
+                        )
+
+
+                        await asyncio.sleep(
+                            SEND_DELAY
+                        )
+
+
+                        # Discordの添付上限を取得
+                        if channel.guild:
+
+                            upload_limit = (
+                                channel.guild.filesize_limit
+                            )
+
+                        else:
+
+                            # ギルド情報を取れなかった場合の
+                            # 安全側の予備値
+                            upload_limit = (
+                                8 * 1024 * 1024
+                            )
+
+
+                        if image_urls:
+
+                            failed_urls = []
+                            attachments = []
+
+                            # 画像を取得し、Discordへ送れる添付を準備する。
+                            for image_index, image_url in enumerate(
+                                image_urls,
+                                start=1
+                            ):
+
+                                attachment = await download_attachment(
+                                    session,
+                                    image_url,
+                                    image_index,
+                                    upload_limit
+                                )
+
+                                if not attachment:
+                                    failed_urls.append(image_url)
+                                    continue
+
+                                file = attachment.get("file")
+
+                                if not file:
+                                    reason = attachment.get(
+                                        "reason",
+                                        "送信できませんでした。"
+                                    )
+
+                                    print(
+                                        f"画像送信対象外: "
+                                        f"{reason} {image_url}"
+                                    )
+
+                                    failed_urls.append(image_url)
+                                    continue
+
+                                attachments.append({
+                                    "file": file,
+                                    "size": attachment.get("size", 0),
+                                    "url": image_url,
+                                })
+
+                            # Discordは1メッセージにつき最大10ファイル。
+                            # さらに合計容量が大きくなりすぎないよう、
+                            # アップロード上限以内でグループ分けする。
+                            file_groups = []
+                            current_group = []
+                            current_size = 0
+                            group_size_limit = max(
+                                upload_limit - (512 * 1024),
+                                1 * 1024 * 1024
+                            )
+
+                            for attachment in attachments:
+                                attachment_size = attachment["size"]
+
+                                should_split = (
+                                    len(current_group) >= 10
+                                    or (
+                                        current_group
+                                        and current_size + attachment_size
+                                        > group_size_limit
+                                    )
+                                )
+
+                                if should_split:
+                                    file_groups.append(current_group)
+                                    current_group = []
+                                    current_size = 0
+
+                                current_group.append(attachment)
+                                current_size += attachment_size
+
+                            if current_group:
+                                file_groups.append(current_group)
+
+                            # グループごとにまとめて送信する。
+                            for file_group in file_groups:
+                                try:
+                                    await channel.send(
+                                        files=[
+                                            item["file"]
+                                            for item in file_group
+                                        ]
+                                    )
+                                    await asyncio.sleep(SEND_DELAY)
+                                except Exception as send_error:
+                                    print(
+                                        f"添付まとめ送信エラー "
+                                        f"channel={channel.id}:",
+                                        send_error
+                                    )
+                                    failed_urls.extend(
+                                        item["url"]
+                                        for item in file_group
+                                    )
+
+                            # 変換後も送れなかったものは元画像URLを投稿
+                            if failed_urls:
+                                failed_text = (
+                                    "⚠️ 容量または変換エラーのため、"
+                                    "添付できなかった画像です。\n"
+                                    + "\n".join(
+                                        f"・{failed_url}"
+                                        for failed_url in failed_urls
+                                    )
+                                )
+
+                                while failed_text:
+                                    message_part = failed_text[:1900]
+                                    failed_text = failed_text[1900:]
+
+                                    await channel.send(
+                                        message_part,
+                                        suppress_embeds=True
+                                    )
+                                    await asyncio.sleep(SEND_DELAY)
+
+
+                    except Exception as e:
+
+                        send_succeeded = False
+
+
+                        print(
+                            f"チャンネル送信エラー "
+                            f"channel={channel.id}:",
+                            e
+                        )
+
+
+                # =====================
+                # DB保存
+                # =====================
+
+                if send_succeeded:
+
+                    save_archive(
+                        blog
+                    )
+
+
+                    print(
+                        "保存完了:",
+                        blog_url
+                    )
+
+                else:
+
+                    print(
+                        "一部の送信に失敗したため、"
+                        "DBには保存しませんでした。"
+                    )
+
+
+            except Exception as e:
+
+                print(
+                    "アーカイブ処理エラー:",
+                    blog_url,
+                    e
+                )
+
+
+            await asyncio.sleep(
+                SEND_DELAY
+            )
+
+
+    print("=" * 50)
+    print("今回のアーカイブ巡回が完了しました。")
+
+
+# =========================
+# Bot準備完了待ち
+# =========================
 
 @archive_loop.before_loop
-async def before_archive_loop() -> None:
+async def before_archive_loop():
 
     await bot.wait_until_ready()
 
-
-@archive_loop.error
-async def archive_loop_error(
-    error: BaseException,
-) -> None:
-
-    print(
-        "アーカイブ巡回タスクエラー:",
-        error,
-    )
-
-
-# =========================
-# コマンドエラー
-# =========================
-
-@bot.event
-async def on_command_error(
-    ctx: commands.Context,
-    error: commands.CommandError,
-) -> None:
-
-    if isinstance(
-        error,
-        commands.CommandNotFound,
-    ):
-
-        return
-
-    if isinstance(
-        error,
-        commands.NotOwner,
-    ):
-
-        await ctx.send(
-            "⚠️ このコマンドはBot所有者専用です。"
-        )
-
-        return
-
-    if isinstance(
-        error,
-        commands.BadArgument,
-    ):
-
-        await ctx.send(
-            "⚠️ コマンドの引数が正しくありません。"
-        )
-
-        return
-
-    print(
-        "コマンド実行エラー:",
-        error,
-    )
-
-    await ctx.send(
-        "⚠️ コマンド実行中にエラーが発生しました。\n"
-        f"`{error}`"
-    )
 
 
 # =========================
@@ -1957,7 +990,6 @@ async def on_command_error(
 # =========================
 
 if not TOKEN:
-
     raise RuntimeError(
         "環境変数 DISCORD_TOKEN が設定されていません。"
     )
