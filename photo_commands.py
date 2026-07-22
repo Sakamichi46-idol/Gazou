@@ -18,6 +18,8 @@ from photo_database import (
     get_photo_db_counts,
     get_photo_image,
     get_photo_storage_stats,
+    init_photo_db,
+    PHOTO_DB_PATH,
     reset_image_analysis_status,
     reset_image_download_status,
     save_manual_tag,
@@ -392,6 +394,51 @@ def register_photo_commands(bot: commands.Bot) -> None:
             return
         lines = [f"`ID {x['id']}` {x['group_name']} / {x['member_name']} / {x['published_at']}" for x in favorites]
         await ctx.send("⭐ **お気に入り一覧**\n" + "\n".join(lines))
+
+    @bot.command(name="photo_reset")
+    @commands.is_owner()
+    async def photo_reset_command(ctx: commands.Context, confirmation: str = "") -> None:
+        """写真検索用DBだけを初期化する。誤操作防止のため確認語が必要。"""
+
+        if confirmation != "confirm":
+            await ctx.send(
+                "⚠️ **写真検索データベースを完全に初期化します。**\n"
+                "ブログ通知用の `archive.db` と `blogs.db` は変更しません。\n"
+                "実行する場合は `!photo_reset confirm` と入力してください。"
+            )
+            return
+
+        await ctx.send("⏳ 写真検索データベースを初期化しています...")
+
+        def reset_database() -> None:
+            # SQLiteの本体と一時ファイルだけを削除する。
+            # 画像ファイル、archive.db、blogs.dbには触れない。
+            for path in (PHOTO_DB_PATH, f"{PHOTO_DB_PATH}-wal", f"{PHOTO_DB_PATH}-shm"):
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except FileNotFoundError:
+                    pass
+
+            init_photo_db()
+
+        try:
+            await asyncio.to_thread(reset_database)
+        except Exception as exc:
+            await ctx.send(
+                "❌ 写真検索データベースの初期化に失敗しました。\n"
+                f"`{type(exc).__name__}: {exc}`"
+            )
+            return
+
+        counts = await asyncio.to_thread(get_photo_db_counts)
+        await ctx.send(
+            "✅ **写真検索データベースを初期化しました。**\n"
+            f"対象: `{PHOTO_DB_PATH}`\n"
+            f"ブログ: {counts['blogs']}件 / 画像: {counts['images']}件 / "
+            f"確認待ち: {counts['pending_reviews']}件\n\n"
+            "次に `!photo_archive_run` を実行してください。"
+        )
 
     @bot.command(name="review_list")
     @commands.is_owner()
