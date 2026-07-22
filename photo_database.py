@@ -2830,7 +2830,6 @@ def search_photo_images(
                     AND pip.person_name LIKE ?
                 )
                 OR photo_blogs.published_at LIKE ?
-                OR COALESCE(photo_ai_analysis.person_name, '') LIKE ?
                 OR COALESCE(photo_ai_analysis.clothing, '') LIKE ?
                 OR COALESCE(photo_ai_analysis.expression, '') LIKE ?
                 OR COALESCE(photo_ai_analysis.background, '') LIKE ?
@@ -2853,7 +2852,7 @@ def search_photo_images(
         )
 
         parameters.extend(
-            [like_value] * 12
+            [like_value] * 11
         )
 
     where_clause = " AND ".join(
@@ -3143,6 +3142,64 @@ def get_photo_storage_stats() -> dict[str, int]:
     }
 
 
+
+def get_pending_person_reviews(limit: int = 100) -> list[dict[str, Any]]:
+    """人物確認待ちを、Discordレビュー画面用の情報付きで返す。"""
+    safe_limit = max(1, min(int(limit), 500))
+
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                photo_review_queue.id AS review_id,
+                photo_review_queue.image_id,
+                photo_review_queue.question,
+                photo_review_queue.candidates,
+                photo_images.image_url,
+                photo_images.local_path,
+                photo_images.image_index,
+                photo_blogs.blog_url,
+                photo_blogs.group_name,
+                photo_blogs.member_name,
+                photo_blogs.title,
+                photo_blogs.published_at,
+                COALESCE(photo_ai_analysis.person_name, '') AS ai_person_name,
+                COALESCE(
+                    (
+                        SELECT GROUP_CONCAT(person_name, '、')
+                        FROM photo_image_people
+                        WHERE photo_image_people.image_id = photo_images.id
+                          AND relation_status = 'candidate'
+                    ),
+                    ''
+                ) AS candidate_people,
+                COALESCE(
+                    (
+                        SELECT GROUP_CONCAT(person_name, '、')
+                        FROM photo_image_people
+                        WHERE photo_image_people.image_id = photo_images.id
+                          AND relation_status = 'confirmed'
+                    ),
+                    ''
+                ) AS confirmed_people
+            FROM photo_review_queue
+            JOIN photo_images
+                ON photo_images.id = photo_review_queue.image_id
+            JOIN photo_blogs
+                ON photo_blogs.id = photo_images.blog_id
+            LEFT JOIN photo_ai_analysis
+                ON photo_ai_analysis.image_id = photo_images.id
+            WHERE photo_review_queue.status = 'pending'
+              AND photo_review_queue.review_type = 'person_identity'
+            ORDER BY photo_review_queue.id ASC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+
+    return rows_to_dicts(rows)
+
+
 # =========================
 # 単体実行テスト
 # =========================
@@ -3171,3 +3228,4 @@ if __name__ == "__main__":
         f"{counts['pending_face_reviews']}件",
     )
     print("=" * 50)
+
