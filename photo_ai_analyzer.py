@@ -1,0 +1,1207 @@
+import asyncio
+import base64
+import json
+import mimetypes
+import os
+import traceback
+
+from pathlib import Path
+from typing import Any
+
+from openai import OpenAI
+
+from photo_database import (
+    get_pending_analysis_images,
+    get_photo_image,
+    save_ai_analysis,
+    save_ai_tag,
+    update_image_analysis_status,
+)
+
+
+# =========================
+# AI解析設定
+# =========================
+
+OPENAI_API_KEY = os.getenv(
+    "OPENAI_API_KEY",
+    "",
+).strip()
+
+PHOTO_AI_MODEL = os.getenv(
+    "PHOTO_AI_MODEL",
+    "gpt-5.6",
+).strip()
+
+PHOTO_AI_DETAIL = os.getenv(
+    "PHOTO_AI_DETAIL",
+    "low",
+).strip().lower()
+
+PHOTO_AI_BATCH_LIMIT = int(
+    os.getenv(
+        "PHOTO_AI_BATCH_LIMIT",
+        "3",
+    )
+)
+
+PHOTO_AI_REQUEST_TIMEOUT = float(
+    os.getenv(
+        "PHOTO_AI_REQUEST_TIMEOUT",
+        "120",
+    )
+)
+
+PHOTO_AI_MAX_FILE_SIZE = int(
+    os.getenv(
+        "PHOTO_AI_MAX_FILE_SIZE",
+        str(20 * 1024 * 1024),
+    )
+)
+
+
+# =========================
+# 許可値
+# =========================
+
+ALLOWED_DETAILS = {
+    "low",
+    "high",
+    "auto",
+}
+
+ALLOWED_TAG_CATEGORIES = {
+    "person_count",
+    "composition",
+    "expression",
+    "clothing",
+    "location",
+    "background",
+    "pose",
+    "object",
+    "season",
+    "weather",
+    "event",
+    "other",
+}
+
+
+# =========================
+# AI出力形式
+# =========================
+
+PHOTO_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {
+            "type": "string",
+            "description": (
+                "画像全体の短い日本語説明。"
+                "実在人物の名前は含めない。"
+            ),
+        },
+        "person_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": (
+                "画像内に見える人物のおおよその人数。"
+            ),
+        },
+        "clothing": {
+            "type": "string",
+            "description": (
+                "主な服装。分からない場合は空文字。"
+            ),
+        },
+        "expression": {
+            "type": "string",
+            "description": (
+                "主な表情。分からない場合は空文字。"
+            ),
+        },
+        "background": {
+            "type": "string",
+            "description": (
+                "背景や場所。分からない場合は空文字。"
+            ),
+        },
+        "pose": {
+            "type": "string",
+            "description": (
+                "ポーズや構図。分からない場合は空文字。"
+            ),
+        },
+        "objects": {
+            "type": "array",
+            "description": (
+                "画像内に明確に見える主な物体。"
+            ),
+            "items": {
+                "type": "string",
+            },
+        },
+        "overall_confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": (
+                "解析全体の確信度。"
+            ),
+        },
+        "needs_review": {
+            "type": "boolean",
+            "description": (
+                "画像が不鮮明などで"
+                "人間の確認が必要かどうか。"
+            ),
+        },
+        "tags": {
+            "type": "array",
+            "description": (
+                "画像検索に利用する日本語タグ。"
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "person_count",
+                            "composition",
+                            "expression",
+                            "clothing",
+                            "location",
+                            "background",
+                            "pose",
+                            "object",
+                            "season",
+                            "weather",
+                            "event",
+                            "other",
+                        ],
+                    },
+                    "tag": {
+                        "type": "string",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                    },
+                },
+                "required": [
+                    "category",
+                    "tag",
+                    "confidence",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": [
+        "summary",
+        "person_count",
+        "clothing",
+        "expression",
+        "background",
+        "pose",
+        "objects",
+        "overall_confidence",
+        "needs_review",
+        "tags",
+    ],
+    "additionalProperties": False,
+}
+
+
+# =========================
+# プロンプト
+# =========================
+
+SYSTEM_PROMPT = """
+あなたは写真検索データベース用の画像分類AIです。
+
+画像を客観的に分析し、日本語の検索タグを作成してください。
+
+重要なルール:
+
+1. 実在人物の氏名や身元を推測・特定しないでください。
+2. 芸能人、有名人、アイドルに見えても名前を出さないでください。
+3. 人物は「1人」「2人」「複数人」など人数・構図だけ扱ってください。
+4. 年齢、民族、国籍、宗教、健康状態などを推測しないでください。
+5. 画像から明確に確認できる内容だけを出力してください。
+6. 不鮮明な内容を無理に断定しないでください。
+7. タグは検索しやすい短い日本語にしてください。
+8. 似た意味のタグを大量に重複させないでください。
+9. タグは原則として最大15件程度にしてください。
+10. 人物が複数写っている場合でも、人物数を可能な範囲で数えてください。
+
+タグの例:
+
+person_count:
+・人物なし
+・1人
+・2人
+・3人
+・複数人
+・大人数
+
+composition:
+・自撮り
+・集合写真
+・ツーショット
+・上半身
+・全身
+・顔アップ
+・縦写真
+・横写真
+
+expression:
+・笑顔
+・無表情
+・目を閉じる
+・驚いた表情
+
+clothing:
+・私服
+・制服風
+・ドレス
+・ライブ衣装
+・和服
+・浴衣
+・帽子
+・眼鏡
+
+location:
+・屋内
+・屋外
+・ステージ
+・楽屋
+・店内
+・公園
+・海
+・街中
+
+season:
+・春
+・夏
+・秋
+・冬
+
+event:
+・ライブ
+・撮影
+・誕生日
+・旅行
+・食事
+
+明確に判定できないタグは追加しないでください。
+"""
+
+
+# =========================
+# 共通処理
+# =========================
+
+def clamp_confidence(
+    value: Any,
+) -> float:
+    """
+    信頼度を0.0から1.0へ収める。
+    """
+
+    try:
+        number = float(
+            value
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return 0.0
+
+    return max(
+        0.0,
+        min(
+            number,
+            1.0,
+        ),
+    )
+
+
+def normalize_text(
+    value: Any,
+) -> str:
+    """
+    値を安全な文字列へ変換する。
+    """
+
+    if value is None:
+        return ""
+
+    return str(
+        value
+    ).strip()
+
+
+def normalize_person_count(
+    value: Any,
+) -> int:
+    """
+    人物数を0以上の整数へ変換する。
+    """
+
+    try:
+        count = int(
+            value
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return 0
+
+    return max(
+        count,
+        0,
+    )
+
+
+def get_image_detail() -> str:
+    """
+    APIへ送る画像detailを返す。
+    """
+
+    if PHOTO_AI_DETAIL in ALLOWED_DETAILS:
+        return PHOTO_AI_DETAIL
+
+    return "low"
+
+
+def get_image_mime_type(
+    image_path: str,
+    stored_mime_type: str = "",
+) -> str:
+    """
+    画像のMIMEタイプを取得する。
+    """
+
+    stored_mime_type = normalize_text(
+        stored_mime_type
+    )
+
+    if stored_mime_type.startswith(
+        "image/"
+    ):
+        return stored_mime_type
+
+    guessed_type, _ = mimetypes.guess_type(
+        image_path
+    )
+
+    if (
+        guessed_type
+        and guessed_type.startswith("image/")
+    ):
+        return guessed_type
+
+    return "image/jpeg"
+
+
+def image_to_data_url(
+    image_path: str,
+    mime_type: str,
+) -> str:
+    """
+    ローカル画像をBase64データURLへ変換する。
+    """
+
+    with open(
+        image_path,
+        "rb",
+    ) as image_file:
+
+        encoded_image = base64.b64encode(
+            image_file.read()
+        ).decode(
+            "utf-8"
+        )
+
+    return (
+        f"data:{mime_type};"
+        f"base64,{encoded_image}"
+    )
+
+
+def validate_image_file(
+    image_path: str,
+) -> Path:
+    """
+    AI解析前に画像ファイルを確認する。
+    """
+
+    if not image_path:
+        raise ValueError(
+            "画像のlocal_pathが空です。"
+        )
+
+    path = Path(
+        image_path
+    )
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"画像ファイルがありません: {image_path}"
+        )
+
+    if not path.is_file():
+        raise ValueError(
+            f"画像ファイルではありません: {image_path}"
+        )
+
+    file_size = path.stat().st_size
+
+    if file_size <= 0:
+        raise ValueError(
+            f"画像ファイルが空です: {image_path}"
+        )
+
+    if file_size > PHOTO_AI_MAX_FILE_SIZE:
+        raise ValueError(
+            "AI解析可能サイズを超えています: "
+            f"{file_size} bytes"
+        )
+
+    return path
+
+
+def get_openai_client() -> OpenAI:
+    """
+    OpenAIクライアントを作成する。
+    """
+
+    if not OPENAI_API_KEY:
+        raise RuntimeError(
+            "Railway Variablesに"
+            "OPENAI_API_KEYが設定されていません。"
+        )
+
+    return OpenAI(
+        api_key=OPENAI_API_KEY,
+        timeout=PHOTO_AI_REQUEST_TIMEOUT,
+    )
+
+
+# =========================
+# AI通信
+# =========================
+
+def request_photo_analysis(
+    image_path: str,
+    stored_mime_type: str = "",
+) -> tuple[dict[str, Any], str]:
+    """
+    OpenAIへ画像を送り、
+    構造化された解析結果を取得する。
+
+    戻り値:
+        解析結果の辞書
+        APIの元出力文字列
+    """
+
+    validate_image_file(
+        image_path
+    )
+
+    mime_type = get_image_mime_type(
+        image_path,
+        stored_mime_type,
+    )
+
+    image_data_url = image_to_data_url(
+        image_path,
+        mime_type,
+    )
+
+    client = get_openai_client()
+
+    response = client.responses.create(
+        model=PHOTO_AI_MODEL,
+        input=[
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": SYSTEM_PROMPT,
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            "この画像を写真検索用に"
+                            "分類してください。"
+                        ),
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": image_data_url,
+                        "detail": get_image_detail(),
+                    },
+                ],
+            },
+        ],
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "photo_analysis",
+                "strict": True,
+                "schema": PHOTO_ANALYSIS_SCHEMA,
+            },
+        },
+    )
+
+    raw_output = normalize_text(
+        response.output_text
+    )
+
+    if not raw_output:
+        raise RuntimeError(
+            "AIから解析結果が返りませんでした。"
+        )
+
+    try:
+        analysis = json.loads(
+            raw_output
+        )
+
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "AI解析結果をJSONとして"
+            "読み込めませんでした。"
+        ) from error
+
+    if not isinstance(
+        analysis,
+        dict,
+    ):
+        raise RuntimeError(
+            "AI解析結果が辞書形式ではありません。"
+        )
+
+    return (
+        analysis,
+        raw_output,
+    )
+
+
+# =========================
+# タグ整理
+# =========================
+
+def build_person_count_tags(
+    person_count: int,
+) -> list[dict[str, Any]]:
+    """
+    人物数から確実な補助タグを作る。
+    """
+
+    tags: list[dict[str, Any]] = []
+
+    if person_count <= 0:
+
+        tags.append(
+            {
+                "category": "person_count",
+                "tag": "人物なし",
+                "confidence": 1.0,
+            }
+        )
+
+    elif person_count == 1:
+
+        tags.append(
+            {
+                "category": "person_count",
+                "tag": "1人",
+                "confidence": 1.0,
+            }
+        )
+
+    elif person_count == 2:
+
+        tags.extend(
+            [
+                {
+                    "category": "person_count",
+                    "tag": "2人",
+                    "confidence": 1.0,
+                },
+                {
+                    "category": "composition",
+                    "tag": "ツーショット",
+                    "confidence": 0.95,
+                },
+                {
+                    "category": "composition",
+                    "tag": "複数人",
+                    "confidence": 1.0,
+                },
+            ]
+        )
+
+    elif person_count == 3:
+
+        tags.extend(
+            [
+                {
+                    "category": "person_count",
+                    "tag": "3人",
+                    "confidence": 1.0,
+                },
+                {
+                    "category": "composition",
+                    "tag": "複数人",
+                    "confidence": 1.0,
+                },
+            ]
+        )
+
+    else:
+
+        tags.append(
+            {
+                "category": "composition",
+                "tag": "複数人",
+                "confidence": 1.0,
+            }
+        )
+
+        if person_count >= 6:
+
+            tags.append(
+                {
+                    "category": "composition",
+                    "tag": "大人数",
+                    "confidence": 0.95,
+                }
+            )
+
+    return tags
+
+
+def normalize_tags(
+    analysis: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """
+    AIタグを検証して重複を除去する。
+    """
+
+    person_count = normalize_person_count(
+        analysis.get(
+            "person_count",
+            0,
+        )
+    )
+
+    source_tags = analysis.get(
+        "tags",
+        [],
+    )
+
+    if not isinstance(
+        source_tags,
+        list,
+    ):
+        source_tags = []
+
+    source_tags.extend(
+        build_person_count_tags(
+            person_count
+        )
+    )
+
+    normalized_tags: list[
+        dict[str, Any]
+    ] = []
+
+    seen: set[
+        tuple[str, str]
+    ] = set()
+
+    for source_tag in source_tags:
+
+        if not isinstance(
+            source_tag,
+            dict,
+        ):
+            continue
+
+        category = normalize_text(
+            source_tag.get(
+                "category",
+                "other",
+            )
+        )
+
+        tag = normalize_text(
+            source_tag.get(
+                "tag",
+                "",
+            )
+        )
+
+        confidence = clamp_confidence(
+            source_tag.get(
+                "confidence",
+                0,
+            )
+        )
+
+        if not tag:
+            continue
+
+        if category not in ALLOWED_TAG_CATEGORIES:
+            category = "other"
+
+        key = (
+            category,
+            tag,
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(
+            key
+        )
+
+        normalized_tags.append(
+            {
+                "category": category,
+                "tag": tag,
+                "confidence": confidence,
+            }
+        )
+
+    return normalized_tags
+
+
+# =========================
+# DB保存
+# =========================
+
+def save_analysis_result(
+    image_id: int,
+    analysis: dict[str, Any],
+    raw_output: str,
+) -> dict[str, Any]:
+    """
+    AI解析結果とタグをDBへ保存する。
+    """
+
+    person_count = normalize_person_count(
+        analysis.get(
+            "person_count",
+            0,
+        )
+    )
+
+    overall_confidence = clamp_confidence(
+        analysis.get(
+            "overall_confidence",
+            0,
+        )
+    )
+
+    needs_review = bool(
+        analysis.get(
+            "needs_review",
+            False,
+        )
+    )
+
+    summary = normalize_text(
+        analysis.get(
+            "summary",
+            "",
+        )
+    )
+
+    clothing = normalize_text(
+        analysis.get(
+            "clothing",
+            "",
+        )
+    )
+
+    expression = normalize_text(
+        analysis.get(
+            "expression",
+            "",
+        )
+    )
+
+    background = normalize_text(
+        analysis.get(
+            "background",
+            "",
+        )
+    )
+
+    pose = normalize_text(
+        analysis.get(
+            "pose",
+            "",
+        )
+    )
+
+    objects_value = analysis.get(
+        "objects",
+        [],
+    )
+
+    if not isinstance(
+        objects_value,
+        list,
+    ):
+        objects_value = []
+
+    objects = [
+        normalize_text(item)
+        for item in objects_value
+        if normalize_text(item)
+    ]
+
+    object_text = json.dumps(
+        objects,
+        ensure_ascii=False,
+    )
+
+    tags = normalize_tags(
+        analysis
+    )
+
+    save_ai_analysis(
+        image_id=image_id,
+        model_name=PHOTO_AI_MODEL,
+        raw_response=raw_output,
+        person_name="",
+        clothing=clothing,
+        expression=expression,
+        background=background,
+        pose=pose,
+        objects=object_text,
+        person_count=person_count,
+        overall_confidence=overall_confidence,
+        needs_review=needs_review,
+    )
+
+    for tag_data in tags:
+
+        save_ai_tag(
+            image_id=image_id,
+            category=tag_data["category"],
+            tag=tag_data["tag"],
+            confidence=tag_data["confidence"],
+            model_name=PHOTO_AI_MODEL,
+            raw_value=summary,
+        )
+
+    final_status = (
+        "review"
+        if needs_review
+        else "completed"
+    )
+
+    update_image_analysis_status(
+        image_id,
+        final_status,
+        "",
+    )
+
+    return {
+        "image_id": image_id,
+        "status": final_status,
+        "person_count": person_count,
+        "tag_count": len(tags),
+        "summary": summary,
+        "overall_confidence": (
+            overall_confidence
+        ),
+        "needs_review": needs_review,
+    }
+
+
+# =========================
+# 画像1枚の解析
+# =========================
+
+def analyze_photo_image_sync(
+    image_id: int,
+) -> dict[str, Any]:
+    """
+    画像1枚を同期処理で解析する。
+    """
+
+    image = get_photo_image(
+        image_id
+    )
+
+    if image is None:
+        raise ValueError(
+            f"画像IDが見つかりません: {image_id}"
+        )
+
+    image_path = normalize_text(
+        image.get(
+            "local_path",
+            "",
+        )
+    )
+
+    mime_type = normalize_text(
+        image.get(
+            "mime_type",
+            "",
+        )
+    )
+
+    update_image_analysis_status(
+        image_id,
+        "processing",
+        "",
+    )
+
+    try:
+
+        analysis, raw_output = (
+            request_photo_analysis(
+                image_path=image_path,
+                stored_mime_type=mime_type,
+            )
+        )
+
+        result = save_analysis_result(
+            image_id=image_id,
+            analysis=analysis,
+            raw_output=raw_output,
+        )
+
+        print(
+            "AI画像解析完了:",
+            f"image_id={image_id}",
+            f"人物数={result['person_count']}",
+            f"タグ数={result['tag_count']}",
+            f"状態={result['status']}",
+        )
+
+        return result
+
+    except Exception as error:
+
+        error_message = (
+            f"{type(error).__name__}: {error}"
+        )
+
+        update_image_analysis_status(
+            image_id,
+            "failed",
+            error_message[:1000],
+        )
+
+        print(
+            "AI画像解析失敗:",
+            f"image_id={image_id}",
+            error_message,
+        )
+
+        traceback.print_exc()
+
+        return {
+            "image_id": image_id,
+            "status": "failed",
+            "error": error_message,
+        }
+
+
+async def analyze_photo_image(
+    image_id: int,
+) -> dict[str, Any]:
+    """
+    Discord Botのイベントループを止めずに
+    画像1枚を解析する。
+    """
+
+    return await asyncio.to_thread(
+        analyze_photo_image_sync,
+        image_id,
+    )
+
+
+# =========================
+# 未解析画像の一括処理
+# =========================
+
+async def analyze_pending_images(
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """
+    ダウンロード済みの未解析画像を
+    指定件数だけ解析する。
+    """
+
+    if limit is None:
+        limit = PHOTO_AI_BATCH_LIMIT
+
+    limit = max(
+        int(limit),
+        1,
+    )
+
+    images = await asyncio.to_thread(
+        get_pending_analysis_images,
+        limit,
+    )
+
+    results: list[
+        dict[str, Any]
+    ] = []
+
+    completed = 0
+    review = 0
+    failed = 0
+
+    for image in images:
+
+        image_id = int(
+            image["id"]
+        )
+
+        result = await analyze_photo_image(
+            image_id
+        )
+
+        results.append(
+            result
+        )
+
+        status = result.get(
+            "status",
+            "",
+        )
+
+        if status == "completed":
+            completed += 1
+
+        elif status == "review":
+            review += 1
+
+        else:
+            failed += 1
+
+        # APIへの連続アクセスを少し緩和する。
+        await asyncio.sleep(
+            1
+        )
+
+    return {
+        "requested": limit,
+        "found": len(images),
+        "completed": completed,
+        "review": review,
+        "failed": failed,
+        "results": results,
+    }
+
+
+# =========================
+# 設定確認
+# =========================
+
+def get_photo_ai_status() -> dict[str, Any]:
+    """
+    AI解析機能の設定状況を返す。
+    APIキーそのものは返さない。
+    """
+
+    return {
+        "enabled": bool(
+            OPENAI_API_KEY
+        ),
+        "model": PHOTO_AI_MODEL,
+        "detail": get_image_detail(),
+        "batch_limit": (
+            PHOTO_AI_BATCH_LIMIT
+        ),
+        "request_timeout": (
+            PHOTO_AI_REQUEST_TIMEOUT
+        ),
+        "max_file_size": (
+            PHOTO_AI_MAX_FILE_SIZE
+        ),
+    }
+
+
+# =========================
+# 単体実行
+# =========================
+
+async def main() -> None:
+    """
+    このファイルを直接実行した場合のテスト。
+    """
+
+    status = get_photo_ai_status()
+
+    print("=" * 50)
+    print("写真AI解析設定")
+    print(
+        "有効:",
+        status["enabled"],
+    )
+    print(
+        "モデル:",
+        status["model"],
+    )
+    print(
+        "画像detail:",
+        status["detail"],
+    )
+    print(
+        "一度の解析件数:",
+        status["batch_limit"],
+    )
+    print("=" * 50)
+
+    if not status["enabled"]:
+
+        print(
+            "OPENAI_API_KEYが"
+            "設定されていません。"
+        )
+
+        return
+
+    result = await analyze_pending_images()
+
+    print(
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+if __name__ == "__main__":
+
+    asyncio.run(
+        main()
+    )
