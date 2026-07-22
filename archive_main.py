@@ -718,6 +718,28 @@ async def archive_loop():
                     f"取得画像数: {len(image_urls)}"
                 )
 
+                
+                # =====================
+                # 写真検索DBへ保存
+                # =====================
+
+                blog["images"] = image_urls
+
+                blog_id = save_photo_blog(blog)
+
+                for image_index, image_url in enumerate(
+                    image_urls,
+                    start=1
+                ):
+
+                    save_photo_image(
+                        blog_id=blog_id,
+                        image_url=image_url,
+                        image_index=image_index
+                    )
+
+
+
 
                 # =====================
                 # Embed作成
