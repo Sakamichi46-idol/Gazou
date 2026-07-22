@@ -98,12 +98,12 @@ async def _redownload_one(session: aiohttp.ClientSession, image_id: int) -> dict
 def register_photo_commands(bot: commands.Bot) -> None:
 
     @bot.command(name="photo_search")
-    @commands.is_owner()
+    
     async def photo_search_command(ctx: commands.Context, *, query: str = "") -> None:
         await send_photo_search_results(ctx, query)
 
     @bot.command(name="photo_search_author")
-    @commands.is_owner()
+    
     async def photo_search_author_command(ctx: commands.Context, *, author_name: str = "") -> None:
         await send_photo_author_search_results(ctx, author_name)
 
@@ -136,7 +136,7 @@ def register_photo_commands(bot: commands.Bot) -> None:
         await ctx.send(f"🧹 画像ID **{image_id}** の確定人物を解除しました。")
 
     @bot.command(name="person_list")
-    @commands.is_owner()
+    
     async def person_list_command(ctx: commands.Context) -> None:
         people = await asyncio.to_thread(get_all_people)
         if not people:
@@ -149,7 +149,7 @@ def register_photo_commands(bot: commands.Bot) -> None:
             await ctx.send(text[start:start + 1900])
 
     @bot.command(name="person_info")
-    @commands.is_owner()
+    
     async def person_info_command(ctx: commands.Context, *, person_name: str = "") -> None:
         person_name = person_name.strip()
         if not person_name:
@@ -290,7 +290,7 @@ def register_photo_commands(bot: commands.Bot) -> None:
         await ctx.send(f"✅ 再ダウンロード終了: 成功 **{succeeded}件** / 対象 **{len(targets)}件**")
 
     @bot.command(name="photo_stats")
-    @commands.is_owner()
+    
     async def photo_stats_command(ctx: commands.Context) -> None:
         counts, storage = await asyncio.gather(
             asyncio.to_thread(get_photo_db_counts),
@@ -320,7 +320,7 @@ def register_photo_commands(bot: commands.Bot) -> None:
         )
 
     @bot.command(name="photo_recent")
-    @commands.is_owner()
+    
     async def photo_recent_command(ctx: commands.Context, limit: int = 10) -> None:
         limit = max(1, min(int(limit), 30))
         recent = await asyncio.to_thread(
@@ -346,7 +346,7 @@ def register_photo_commands(bot: commands.Bot) -> None:
         await ctx.send("🕒 **最近登録された画像**\n" + "\n".join(lines))
 
     @bot.command(name="favorite_add")
-    @commands.is_owner()
+    
     async def favorite_add_command(ctx: commands.Context, image_id: int) -> None:
         if not await asyncio.to_thread(get_photo_image, image_id):
             await ctx.send("⚠️ 画像IDが見つかりません。")
@@ -359,7 +359,7 @@ def register_photo_commands(bot: commands.Bot) -> None:
         await ctx.send(f"⭐ 画像ID **{image_id}** をお気に入りに追加しました。")
 
     @bot.command(name="favorite_remove")
-    @commands.is_owner()
+    
     async def favorite_remove_command(ctx: commands.Context, image_id: int) -> None:
         deleted = await asyncio.to_thread(
             _execute,
@@ -369,7 +369,7 @@ def register_photo_commands(bot: commands.Bot) -> None:
         await ctx.send("⭐ お気に入りから削除しました。" if deleted else "⚠️ お気に入りに登録されていません。")
 
     @bot.command(name="favorite_list")
-    @commands.is_owner()
+    
     async def favorite_list_command(ctx: commands.Context, limit: int = 20) -> None:
         limit = max(1, min(int(limit), 50))
         favorites = await asyncio.to_thread(
