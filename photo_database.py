@@ -148,6 +148,41 @@ def clamp_confidence(
     )
 
 
+def ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_definition: str,
+) -> None:
+    """
+    既存テーブルに不足列がある場合だけ追加する。
+
+    CREATE TABLE IF NOT EXISTSでは、
+    すでに存在するテーブルへ新しい列は追加されないため、
+    Railway Volume上の既存DBを安全に更新する目的で使用する。
+    """
+
+    columns = connection.execute(
+        f"PRAGMA table_info({table_name})"
+    ).fetchall()
+
+    existing_names = {
+        str(row["name"])
+        for row in columns
+    }
+
+    if column_name in existing_names:
+
+        return
+
+    connection.execute(
+        f"""
+        ALTER TABLE {table_name}
+        ADD COLUMN {column_name} {column_definition}
+        """
+    )
+
+
 # =========================
 # DB初期化
 # =========================
@@ -157,7 +192,7 @@ def init_photo_db() -> None:
     写真検索用DBと必要なテーブルを作成する。
 
     既存のphoto_archive.dbが存在する場合でも、
-    データを削除せず不足テーブルだけ追加する。
+    データを削除せず不足テーブル・不足列だけ追加する。
     """
 
     os.makedirs(
@@ -220,8 +255,9 @@ def init_photo_db() -> None:
                 image_hash TEXT NOT NULL DEFAULT '',
 
                 download_status TEXT NOT NULL DEFAULT 'pending',
-                analysis_status TEXT NOT NULL DEFAULT 'pending',
+                download_error TEXT NOT NULL DEFAULT '',
 
+                analysis_status TEXT NOT NULL DEFAULT 'pending',
                 analysis_error TEXT NOT NULL DEFAULT '',
 
                 created_at TEXT NOT NULL,
@@ -387,7 +423,7 @@ def init_photo_db() -> None:
         )
 
         # =========================
-        # ここから人物認識用の追加テーブル
+        # 人物確認用テーブル
         # =========================
 
         # -------------------------
@@ -525,6 +561,17 @@ def init_photo_db() -> None:
                     ON DELETE SET NULL
             )
             """
+        )
+
+        # =========================
+        # 既存DB向けマイグレーション
+        # =========================
+
+        ensure_column(
+            connection,
+            "photo_images",
+            "download_error",
+            "TEXT NOT NULL DEFAULT ''",
         )
 
         # =========================
@@ -883,6 +930,7 @@ def save_photo_image(
                 height,
                 image_hash,
                 download_status,
+                download_error,
                 analysis_status,
                 analysis_error,
                 created_at,
@@ -891,6 +939,7 @@ def save_photo_image(
             VALUES (
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
+                '',
                 'pending',
                 '',
                 ?, ?
@@ -948,6 +997,12 @@ def save_photo_image(
                     ELSE excluded.download_status
                 END,
 
+                download_error = CASE
+                    WHEN excluded.download_status = 'completed'
+                    THEN ''
+                    ELSE photo_images.download_error
+                END,
+
                 updated_at = excluded.updated_at
             """,
             (
@@ -995,6 +1050,55 @@ def save_photo_image(
     )
 
 
+def save_photo_images(
+    blog_id: int,
+    image_urls: list[str],
+) -> list[dict[str, Any]]:
+    """
+    ブログ画像URL一覧をまとめて登録する。
+
+    戻り値例:
+        [
+            {
+                "image_id": 1,
+                "image_url": "...",
+                "image_index": 1,
+            }
+        ]
+    """
+
+    records: list[dict[str, Any]] = []
+
+    for image_index, image_url in enumerate(
+        image_urls,
+        start=1,
+    ):
+
+        clean_url = str(
+            image_url
+        ).strip()
+
+        if not clean_url:
+
+            continue
+
+        image_id = save_photo_image(
+            blog_id=blog_id,
+            image_url=clean_url,
+            image_index=image_index,
+        )
+
+        records.append(
+            {
+                "image_id": image_id,
+                "image_url": clean_url,
+                "image_index": image_index,
+            }
+        )
+
+    return records
+
+
 def get_photo_image(
     image_id: int,
 ) -> dict[str, Any] | None:
@@ -1040,7 +1144,10 @@ def get_pending_analysis_images(
 ) -> list[dict[str, Any]]:
     """
     ダウンロード済みで、
-    AI解析が未完了の画像を取得する。
+    AI解析がまだ一度も完了していない画像を取得する。
+
+    failedは自動では再試行せず、
+    必要に応じて明示的にpendingへ戻してから再解析する。
     """
 
     limit = max(
@@ -1073,8 +1180,7 @@ def get_pending_analysis_images(
                 photo_images.download_status = 'completed'
 
             AND
-                photo_images.analysis_status
-                IN ('pending', 'failed')
+                photo_images.analysis_status = 'pending'
 
             AND
                 photo_images.local_path != ''
@@ -1112,6 +1218,7 @@ def update_image_download(
 ) -> None:
     """
     画像ダウンロード後の情報を更新する。
+    成功時は以前のダウンロードエラーを消す。
     """
 
     with closing(
@@ -1131,6 +1238,7 @@ def update_image_download(
                 height = ?,
                 image_hash = ?,
                 download_status = ?,
+                download_error = '',
                 updated_at = ?
 
             WHERE id = ?
@@ -1144,6 +1252,75 @@ def update_image_download(
                 height,
                 image_hash,
                 status,
+                utc_now_text(),
+                image_id,
+            ),
+        )
+
+        connection.commit()
+
+
+def update_image_download_failure(
+    image_id: int,
+    error_message: str,
+) -> None:
+    """
+    画像ダウンロード失敗状態とエラー内容を保存する。
+    """
+
+    error_text = str(
+        error_message
+    ).strip()[:1000]
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            UPDATE photo_images
+
+            SET
+                download_status = 'failed',
+                download_error = ?,
+                updated_at = ?
+
+            WHERE id = ?
+            """,
+            (
+                error_text,
+                utc_now_text(),
+                image_id,
+            ),
+        )
+
+        connection.commit()
+
+
+def reset_image_download_status(
+    image_id: int,
+) -> None:
+    """
+    画像のダウンロード状態をpendingへ戻す。
+    手動再試行用。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            UPDATE photo_images
+
+            SET
+                download_status = 'pending',
+                download_error = '',
+                updated_at = ?
+
+            WHERE id = ?
+            """,
+            (
                 utc_now_text(),
                 image_id,
             ),
@@ -1168,6 +1345,10 @@ def update_image_analysis_status(
         failed
     """
 
+    error_text = str(
+        error_message
+    ).strip()[:2000]
+
     with closing(
         get_connection()
     ) as connection:
@@ -1185,7 +1366,39 @@ def update_image_analysis_status(
             """,
             (
                 status,
-                error_message,
+                error_text,
+                utc_now_text(),
+                image_id,
+            ),
+        )
+
+        connection.commit()
+
+
+def reset_image_analysis_status(
+    image_id: int,
+) -> None:
+    """
+    AI解析状態をpendingへ戻す。
+    手動再解析用。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            UPDATE photo_images
+
+            SET
+                analysis_status = 'pending',
+                analysis_error = '',
+                updated_at = ?
+
+            WHERE id = ?
+            """,
+            (
                 utc_now_text(),
                 image_id,
             ),
@@ -1293,6 +1506,33 @@ def save_ai_analysis(
 # =========================
 # AIタグ
 # =========================
+
+def clear_ai_tags(
+    image_id: int,
+) -> None:
+    """
+    指定画像の既存AIタグをすべて削除する。
+
+    再解析前に呼び出すことで、
+    古い解析結果のタグが残ることを防ぐ。
+    """
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        connection.execute(
+            """
+            DELETE FROM photo_ai_tags
+            WHERE image_id = ?
+            """,
+            (
+                image_id,
+            ),
+        )
+
+        connection.commit()
+
 
 def save_ai_tag(
     image_id: int,
@@ -1736,11 +1976,6 @@ def save_face_candidate(
 ) -> None:
     """
     顔に対する人物候補を保存する。
-
-    例:
-        顔1
-        ・菅原咲月 0.91
-        ・小川彩 0.07
     """
 
     confidence = clamp_confidence(
@@ -1799,11 +2034,6 @@ def confirm_face_person(
 ) -> None:
     """
     顔に写っている人物を確定する。
-
-    confirmation_status例:
-        auto_confirmed
-        confirmed
-        manually_confirmed
     """
 
     now = utc_now_text()
@@ -1966,8 +2196,6 @@ def add_review_item(
 ) -> None:
     """
     人間による画像単位の確認待ちを登録する。
-
-    candidatesにはJSON文字列などを保存できる。
     """
 
     now = utc_now_text()
@@ -2270,9 +2498,6 @@ def search_images_by_person(
 ) -> list[dict[str, Any]]:
     """
     画像内人物名から画像を検索する。
-
-    これにより、井上和のブログ内に写った
-    菅原咲月の写真も検索対象にできる。
     """
 
     person_name = str(
@@ -2503,18 +2728,6 @@ def get_photo_db_counts() -> dict[str, int]:
 def get_photo_storage_stats() -> dict[str, int]:
     """
     画像ファイルの保存状況を返す。
-
-    completed:
-        ダウンロード完了件数
-
-    pending:
-        未ダウンロード件数
-
-    failed:
-        ダウンロード失敗件数
-
-    total_size:
-        保存済み画像の合計容量
     """
 
     with closing(
