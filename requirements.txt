@@ -7,3 +7,4 @@ aiohttp
 lxml
 imageio-ffmpeg
 Pillow
+openai
