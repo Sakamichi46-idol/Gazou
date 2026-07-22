@@ -3,7 +3,7 @@ from typing import Any
 
 import discord
 
-from photo_database import search_photo_images
+from photo_database import search_photo_images, search_photo_images_by_author
 
 
 # =========================
@@ -112,19 +112,19 @@ def build_search_embed(
         inline=False,
     )
 
-    ai_person_name = str(
-        result.get("ai_person_name")
-        or ""
-    ).strip()
+    confirmed_people = str(result.get("confirmed_people") or "").strip()
+    candidate_people = str(result.get("candidate_people") or "").strip()
 
-    if ai_person_name:
-
+    if confirmed_people:
         embed.add_field(
-            name="🤖 AI人物判定",
-            value=shorten_text(
-                ai_person_name,
-                1024,
-            ),
+            name="✅ 写っている人物（確定）",
+            value=shorten_text(confirmed_people, 1024),
+            inline=False,
+        )
+    elif candidate_people:
+        embed.add_field(
+            name="🧐 人物候補（未確認）",
+            value=shorten_text(candidate_people, 1024),
             inline=False,
         )
 
@@ -388,3 +388,22 @@ async def send_photo_search_results(
         await ctx.send(
             embed=embed
         )
+
+
+async def send_photo_author_search_results(ctx, author_name: str, limit: int = DEFAULT_SEARCH_LIMIT) -> None:
+    clean_name = str(author_name or "").strip()
+    if not clean_name:
+        await ctx.send("⚠️ 投稿者名を入力してください。\n例: `!photo_search_author 菅原咲月`")
+        return
+    try:
+        results = search_photo_images_by_author(clean_name, limit=max(1, min(int(limit), MAX_SEARCH_LIMIT)))
+    except Exception as error:
+        await ctx.send(f"⚠️ 投稿者検索中にエラーが発生しました。\n`{shorten_text(error, 1500)}`")
+        return
+    if not results:
+        await ctx.send(f"🔍 **{clean_name}** のブログ画像は見つかりませんでした。")
+        return
+    await ctx.send(f"📝 **ブログ投稿者検索**: `{shorten_text(clean_name, 1000)}`\n表示件数: **{len(results)}件**")
+    for index, result in enumerate(results, start=1):
+        embed = build_search_embed(result, query=f"投稿者:{clean_name}", index=index, total=len(results))
+        await ctx.send(embed=embed)
