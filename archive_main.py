@@ -476,6 +476,47 @@ async def archive_start(ctx):
         "アーカイブ巡回を開始しました。"
     )
 
+
+# =========================
+# 容量表示
+# =========================
+
+def format_file_size(
+    size_bytes: int
+) -> str:
+    """
+    バイト数を読みやすい容量表記へ変換する。
+    """
+
+    size = float(
+        max(
+            int(size_bytes),
+            0
+        )
+    )
+
+    units = [
+        "B",
+        "KB",
+        "MB",
+        "GB",
+        "TB",
+    ]
+
+    for unit in units:
+
+        if size < 1024 or unit == units[-1]:
+
+            if unit == "B":
+
+                return f"{int(size)} {unit}"
+
+            return f"{size:.2f} {unit}"
+
+        size /= 1024
+
+    return f"{int(size_bytes)} B"
+
 # =========================
 # 写真検索DB件数確認
 # =========================
@@ -512,6 +553,44 @@ async def photo_count_command(ctx):
             f"`{error}`"
         )
 
+# =========================
+# 写真ファイル保存状況
+# =========================
+
+@bot.command(
+    name="photo_storage"
+)
+@commands.is_owner()
+async def photo_storage_command(ctx):
+
+    try:
+
+        stats = get_photo_storage_stats()
+
+        storage_path = get_photo_storage_path()
+
+        await ctx.send(
+            "💾 **写真ファイルの保存状況**\n"
+            f"画像登録数: **{stats['total_images']}件**\n"
+            f"保存完了: **{stats['completed']}件**\n"
+            f"未保存: **{stats['pending']}件**\n"
+            f"保存失敗: **{stats['failed']}件**\n"
+            f"保存容量: **{format_file_size(stats['total_size'])}**\n"
+            f"保存先: `{storage_path}`"
+        )
+
+    except Exception as error:
+
+        print(
+            "写真保存状況取得エラー:",
+            error
+        )
+
+        await ctx.send(
+            "⚠️ 写真ファイルの保存状況を"
+            "取得できませんでした。\n"
+            f"`{error}`"
+        )
 
 # =========================
 # 停止コマンド
