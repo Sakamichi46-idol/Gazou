@@ -9,6 +9,7 @@ from archive_image_getter import get_images
 from photo_ai_analyzer import analyze_photo_image, get_photo_ai_status
 from photo_database import (
     get_photo_blog_by_url,
+    add_image_person_candidate,
     init_photo_db,
     save_photo_blog,
     save_photo_images,
@@ -295,6 +296,19 @@ async def process_photo_blog(
             image_urls,
         )
         result["registered"] = len(image_records)
+
+        # 投稿者名は「写っている人物の候補」としてだけ登録する。
+        # 本人確定にはせず、Discordの確認コマンドで確定する。
+        author_name = str(blog.get("member", "")).strip()
+        if author_name:
+            for image_record in image_records:
+                await asyncio.to_thread(
+                    add_image_person_candidate,
+                    int(image_record["image_id"]),
+                    author_name,
+                    source="blog_author",
+                    confidence=0.35,
+                )
     except Exception as error:
         result["status"] = "failed"
         result["error"] = f"写真DB登録エラー: {type(error).__name__}: {error}"
