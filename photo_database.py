@@ -400,6 +400,29 @@ def init_photo_db() -> None:
         )
 
         # -------------------------
+        # 画像に写っている人物
+        # -------------------------
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS photo_image_people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                image_id INTEGER NOT NULL,
+                person_name TEXT NOT NULL,
+                relation_status TEXT NOT NULL DEFAULT 'candidate',
+                source TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 0,
+                confirmed_by TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(image_id, person_name),
+                FOREIGN KEY(image_id) REFERENCES photo_images(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        # -------------------------
         # お気に入り
         # -------------------------
 
@@ -583,6 +606,13 @@ def init_photo_db() -> None:
             CREATE INDEX IF NOT EXISTS
             idx_photo_blogs_group
             ON photo_blogs(group_name)
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_photo_image_people_name
+            ON photo_image_people(person_name, relation_status)
             """
         )
 
@@ -2631,6 +2661,129 @@ def search_images_by_person(
 # 写真キーワード検索
 # =========================
 
+# =========================
+# 画像人物情報
+# =========================
+
+def add_image_person_candidate(image_id: int, person_name: str, *, source: str = "blog_author", confidence: float = 0.35) -> None:
+    person_name = str(person_name or "").strip()
+    if not person_name:
+        return
+    now = utc_now_text()
+    with closing(get_connection()) as connection:
+        connection.execute(
+            """
+            INSERT INTO photo_image_people (
+                image_id, person_name, relation_status, source, confidence,
+                confirmed_by, note, created_at, updated_at
+            ) VALUES (?, ?, 'candidate', ?, ?, '', '', ?, ?)
+            ON CONFLICT(image_id, person_name) DO UPDATE SET
+                source = CASE WHEN photo_image_people.relation_status = 'confirmed'
+                              THEN photo_image_people.source ELSE excluded.source END,
+                confidence = CASE WHEN photo_image_people.relation_status = 'confirmed'
+                                  THEN photo_image_people.confidence ELSE excluded.confidence END,
+                updated_at = excluded.updated_at
+            """,
+            (image_id, person_name, source, clamp_confidence(confidence), now, now),
+        )
+        existing = connection.execute(
+            "SELECT 1 FROM photo_image_people WHERE image_id = ? AND relation_status = 'confirmed' LIMIT 1",
+            (image_id,),
+        ).fetchone()
+        if existing is None:
+            connection.execute(
+                """
+                INSERT INTO photo_review_queue (
+                    image_id, review_type, question, candidates, status,
+                    created_at, updated_at
+                ) VALUES (?, 'person_identity', 'この写真に写っている人物を確認してください。', ?, 'pending', ?, ?)
+                ON CONFLICT(image_id) DO UPDATE SET
+                    review_type = 'person_identity',
+                    question = excluded.question,
+                    candidates = excluded.candidates,
+                    status = CASE WHEN photo_review_queue.status = 'completed' THEN photo_review_queue.status ELSE 'pending' END,
+                    updated_at = excluded.updated_at
+                """,
+                (image_id, person_name, now, now),
+            )
+        connection.commit()
+
+
+def set_confirmed_image_people(image_id: int, person_names: list[str], *, confirmed_by: str = "", note: str = "") -> None:
+    names=[]
+    for value in person_names:
+        name=str(value or "").strip()
+        if name and name not in names:
+            names.append(name)
+    now=utc_now_text()
+    with closing(get_connection()) as connection:
+        connection.execute("DELETE FROM photo_image_people WHERE image_id = ? AND relation_status = 'confirmed'", (image_id,))
+        for name in names:
+            connection.execute(
+                """
+                INSERT INTO photo_image_people (
+                    image_id, person_name, relation_status, source, confidence,
+                    confirmed_by, note, created_at, updated_at
+                ) VALUES (?, ?, 'confirmed', 'manual', 1.0, ?, ?, ?, ?)
+                ON CONFLICT(image_id, person_name) DO UPDATE SET
+                    relation_status='confirmed', source='manual', confidence=1.0,
+                    confirmed_by=excluded.confirmed_by, note=excluded.note, updated_at=excluded.updated_at
+                """,
+                (image_id, name, confirmed_by, note, now, now),
+            )
+            connection.execute(
+                """INSERT INTO photo_people(person_name, group_name, generation_name, is_active, created_at, updated_at)
+                   VALUES (?, '', '', 1, ?, ?)
+                   ON CONFLICT(person_name) DO UPDATE SET updated_at=excluded.updated_at""",
+                (name, now, now),
+            )
+        connection.execute(
+            """UPDATE photo_review_queue SET status='completed', selected_value=?, reviewed_by=?,
+               review_note=?, reviewed_at=?, updated_at=? WHERE image_id=?""",
+            ("、".join(names), confirmed_by, note, now, now, image_id),
+        )
+        connection.commit()
+
+
+def get_image_people(image_id: int) -> list[dict[str, Any]]:
+    with closing(get_connection()) as connection:
+        rows=connection.execute(
+            "SELECT * FROM photo_image_people WHERE image_id=? ORDER BY CASE relation_status WHEN 'confirmed' THEN 0 ELSE 1 END, id",
+            (image_id,),
+        ).fetchall()
+        return rows_to_dicts(rows)
+
+
+def search_photo_images_by_author(author_name: str, limit: int = 10) -> list[dict[str, Any]]:
+    author_name=str(author_name or "").strip()
+    if not author_name:
+        return []
+    with closing(get_connection()) as connection:
+        rows=connection.execute(
+            """
+            SELECT photo_images.*, photo_blogs.blog_url, photo_blogs.group_name,
+                   photo_blogs.member_name, photo_blogs.title, photo_blogs.published_at,
+                   '' AS ai_person_name,
+                   COALESCE(photo_ai_analysis.clothing,'') AS clothing,
+                   COALESCE(photo_ai_analysis.expression,'') AS expression,
+                   COALESCE(photo_ai_analysis.background,'') AS background,
+                   COALESCE(photo_ai_analysis.pose,'') AS pose,
+                   COALESCE(photo_ai_analysis.objects,'') AS objects,
+                   '' AS ai_tags, '' AS manual_tags,
+                   COALESCE((SELECT GROUP_CONCAT(person_name, '、') FROM photo_image_people p
+                             WHERE p.image_id=photo_images.id AND p.relation_status='confirmed'),'') AS confirmed_people,
+                   COALESCE((SELECT GROUP_CONCAT(person_name, '、') FROM photo_image_people p
+                             WHERE p.image_id=photo_images.id AND p.relation_status='candidate'),'') AS candidate_people
+            FROM photo_images JOIN photo_blogs ON photo_blogs.id=photo_images.blog_id
+            LEFT JOIN photo_ai_analysis ON photo_ai_analysis.image_id=photo_images.id
+            WHERE photo_images.download_status='completed' AND photo_images.local_path!=''
+              AND photo_blogs.member_name LIKE ?
+            ORDER BY photo_blogs.published_at DESC, photo_images.image_index ASC
+            LIMIT ?
+            """, (f"%{author_name}%", max(1,min(int(limit),50)))
+        ).fetchall()
+        return rows_to_dicts(rows)
+
 def search_photo_images(
     query: str,
     limit: int = 10,
@@ -2669,8 +2822,13 @@ def search_photo_images(
             """
             (
                 photo_blogs.group_name LIKE ?
-                OR photo_blogs.member_name LIKE ?
                 OR photo_blogs.title LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM photo_image_people pip
+                    WHERE pip.image_id = photo_images.id
+                    AND pip.relation_status = 'confirmed'
+                    AND pip.person_name LIKE ?
+                )
                 OR photo_blogs.published_at LIKE ?
                 OR COALESCE(photo_ai_analysis.person_name, '') LIKE ?
                 OR COALESCE(photo_ai_analysis.clothing, '') LIKE ?
@@ -2720,6 +2878,13 @@ def search_photo_images(
                 photo_blogs.member_name,
                 photo_blogs.title,
                 photo_blogs.published_at,
+
+                COALESCE((SELECT GROUP_CONCAT(person_name, '、') FROM photo_image_people pip
+                          WHERE pip.image_id=photo_images.id AND pip.relation_status='confirmed'), '')
+                    AS confirmed_people,
+                COALESCE((SELECT GROUP_CONCAT(person_name, '、') FROM photo_image_people pip
+                          WHERE pip.image_id=photo_images.id AND pip.relation_status='candidate'), '')
+                    AS candidate_people,
 
                 COALESCE(photo_ai_analysis.person_name, '')
                     AS ai_person_name,
