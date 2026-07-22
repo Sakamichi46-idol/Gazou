@@ -12,6 +12,8 @@ from discord.ext import commands
 from photo_ai_analyzer import analyze_photo_image
 from photo_database import (
     get_all_people,
+    get_image_people,
+    set_confirmed_image_people,
     get_connection,
     get_photo_db_counts,
     get_photo_image,
@@ -21,7 +23,7 @@ from photo_database import (
     save_manual_tag,
 )
 from photo_image_downloader import download_photo_image
-from photo_search import send_photo_search_results
+from photo_search import send_photo_search_results, send_photo_author_search_results
 
 
 def _now() -> str:
@@ -99,6 +101,39 @@ def register_photo_commands(bot: commands.Bot) -> None:
     @commands.is_owner()
     async def photo_search_command(ctx: commands.Context, *, query: str = "") -> None:
         await send_photo_search_results(ctx, query)
+
+    @bot.command(name="photo_search_author")
+    @commands.is_owner()
+    async def photo_search_author_command(ctx: commands.Context, *, author_name: str = "") -> None:
+        await send_photo_author_search_results(ctx, author_name)
+
+    @bot.command(name="photo_person_set")
+    @commands.is_owner()
+    async def photo_person_set_command(ctx: commands.Context, image_id: int, *, person_names: str = "") -> None:
+        names = [name.strip() for name in person_names.replace("、", ",").split(",") if name.strip()]
+        if not names:
+            await ctx.send("使い方: `!photo_person_set 画像ID 人物名`\n複数人: `!photo_person_set 125 菅原咲月,井上和`")
+            return
+        if not await asyncio.to_thread(get_photo_image, image_id):
+            await ctx.send("⚠️ 画像IDが見つかりません。")
+            return
+        await asyncio.to_thread(
+            set_confirmed_image_people, image_id, names,
+            confirmed_by=str(ctx.author.id), note="Discord command",
+        )
+        await ctx.send(f"✅ 画像ID **{image_id}** の人物を **{'、'.join(names)}** として確定しました。")
+
+    @bot.command(name="photo_person_clear")
+    @commands.is_owner()
+    async def photo_person_clear_command(ctx: commands.Context, image_id: int) -> None:
+        if not await asyncio.to_thread(get_photo_image, image_id):
+            await ctx.send("⚠️ 画像IDが見つかりません。")
+            return
+        await asyncio.to_thread(
+            set_confirmed_image_people, image_id, [],
+            confirmed_by=str(ctx.author.id), note="人物なし・判定解除",
+        )
+        await ctx.send(f"🧹 画像ID **{image_id}** の確定人物を解除しました。")
 
     @bot.command(name="person_list")
     @commands.is_owner()
@@ -386,7 +421,36 @@ def register_photo_commands(bot: commands.Bot) -> None:
     @bot.command(name="review_done")
     @commands.is_owner()
     async def review_done_command(ctx: commands.Context, review_id: int, *, selected_value: str = "") -> None:
+        review = await asyncio.to_thread(
+            _row,
+            "SELECT * FROM photo_review_queue WHERE id = ? AND status = 'pending'",
+            (review_id,),
+        )
+        if not review:
+            await ctx.send("⚠️ 指定された確認待ちは見つかりません。")
+            return
+
         selected_value = selected_value.strip()
+        if review.get("review_type") == "person_identity":
+            if not selected_value:
+                await ctx.send(
+                    "⚠️ 写っている人物名を入力してください。\n"
+                    f"例: `!review_done {review_id} 井上和`\n"
+                    f"複数人: `!review_done {review_id} 菅原咲月,井上和`\n"
+                    f"人物なし: `!review_done {review_id} なし`"
+                )
+                return
+            names = [] if selected_value in {"なし", "人物なし", "不明"} else [
+                name.strip() for name in selected_value.replace("、", ",").split(",") if name.strip()
+            ]
+            await asyncio.to_thread(
+                set_confirmed_image_people, int(review["image_id"]), names,
+                confirmed_by=str(ctx.author.id), note="Discord review",
+            )
+            display = "人物なし" if not names else "、".join(names)
+            await ctx.send(f"✅ Review **{review_id}** を完了し、画像ID **{review['image_id']}** を **{display}** として確定しました。")
+            return
+
         updated = await asyncio.to_thread(
             _execute,
             """
@@ -397,7 +461,5 @@ def register_photo_commands(bot: commands.Bot) -> None:
             """,
             (str(ctx.author.id), selected_value, _now(), _now(), review_id),
         )
-        if updated:
-            await ctx.send(f"✅ Review **{review_id}** を完了にしました。")
-        else:
-            await ctx.send("⚠️ 指定された確認待ちは見つかりません。")
+        await ctx.send(f"✅ Review **{review_id}** を完了にしました。" if updated else "⚠️ 指定された確認待ちは見つかりません。")
+
