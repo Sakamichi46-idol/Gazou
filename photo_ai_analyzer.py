@@ -11,6 +11,7 @@ from typing import Any
 from openai import OpenAI
 
 from photo_database import (
+    clear_ai_tags,
     get_pending_analysis_images,
     get_photo_image,
     save_ai_analysis,
@@ -30,7 +31,7 @@ OPENAI_API_KEY = os.getenv(
 
 PHOTO_AI_MODEL = os.getenv(
     "PHOTO_AI_MODEL",
-    "gpt-5.6",
+    "gpt-5-mini",
 ).strip()
 
 PHOTO_AI_DETAIL = os.getenv(
@@ -38,25 +39,90 @@ PHOTO_AI_DETAIL = os.getenv(
     "low",
 ).strip().lower()
 
-PHOTO_AI_BATCH_LIMIT = int(
-    os.getenv(
-        "PHOTO_AI_BATCH_LIMIT",
-        "3",
+
+def get_env_int(
+    name: str,
+    default: int,
+    minimum: int = 1,
+) -> int:
+    """
+    環境変数を安全に整数へ変換する。
+    不正な値の場合は既定値を使用する。
+    """
+
+    raw_value = os.getenv(
+        name,
+        str(default),
     )
+
+    try:
+        value = int(
+            raw_value
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        value = default
+
+    return max(
+        value,
+        minimum,
+    )
+
+
+def get_env_float(
+    name: str,
+    default: float,
+    minimum: float = 0.1,
+) -> float:
+    """
+    環境変数を安全に小数へ変換する。
+    不正な値の場合は既定値を使用する。
+    """
+
+    raw_value = os.getenv(
+        name,
+        str(default),
+    )
+
+    try:
+        value = float(
+            raw_value
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        value = default
+
+    return max(
+        value,
+        minimum,
+    )
+
+
+PHOTO_AI_BATCH_LIMIT = get_env_int(
+    "PHOTO_AI_BATCH_LIMIT",
+    3,
 )
 
-PHOTO_AI_REQUEST_TIMEOUT = float(
-    os.getenv(
-        "PHOTO_AI_REQUEST_TIMEOUT",
-        "120",
-    )
+PHOTO_AI_REQUEST_TIMEOUT = get_env_float(
+    "PHOTO_AI_REQUEST_TIMEOUT",
+    120.0,
 )
 
-PHOTO_AI_MAX_FILE_SIZE = int(
-    os.getenv(
-        "PHOTO_AI_MAX_FILE_SIZE",
-        str(20 * 1024 * 1024),
-    )
+PHOTO_AI_MAX_FILE_SIZE = get_env_int(
+    "PHOTO_AI_MAX_FILE_SIZE",
+    20 * 1024 * 1024,
+)
+
+PHOTO_AI_REQUEST_INTERVAL = get_env_float(
+    "PHOTO_AI_REQUEST_INTERVAL",
+    1.0,
+    minimum=0.0,
 )
 
 
@@ -296,7 +362,7 @@ event:
 ・食事
 
 明確に判定できないタグは追加しないでください。
-"""
+""".strip()
 
 
 # =========================
@@ -388,8 +454,13 @@ def get_image_mime_type(
     画像のMIMEタイプを取得する。
     """
 
-    stored_mime_type = normalize_text(
-        stored_mime_type
+    stored_mime_type = (
+        normalize_text(
+            stored_mime_type
+        )
+        .split(";")[0]
+        .strip()
+        .lower()
     )
 
     if stored_mime_type.startswith(
@@ -488,6 +559,11 @@ def get_openai_client() -> OpenAI:
             "OPENAI_API_KEYが設定されていません。"
         )
 
+    if not PHOTO_AI_MODEL:
+        raise RuntimeError(
+            "PHOTO_AI_MODELが空です。"
+        )
+
     return OpenAI(
         api_key=OPENAI_API_KEY,
         timeout=PHOTO_AI_REQUEST_TIMEOUT,
@@ -529,6 +605,7 @@ def request_photo_analysis(
 
     response = client.responses.create(
         model=PHOTO_AI_MODEL,
+        store=False,
         input=[
             {
                 "role": "system",
@@ -710,15 +787,20 @@ def normalize_tags(
         )
     )
 
-    source_tags = analysis.get(
+    source_tags_value = analysis.get(
         "tags",
         [],
     )
 
-    if not isinstance(
-        source_tags,
+    if isinstance(
+        source_tags_value,
         list,
     ):
+        source_tags = list(
+            source_tags_value
+        )
+
+    else:
         source_tags = []
 
     source_tags.extend(
@@ -820,11 +902,12 @@ def save_analysis_result(
         )
     )
 
-    needs_review = bool(
+    needs_review = (
         analysis.get(
             "needs_review",
             False,
         )
+        is True
     )
 
     summary = normalize_text(
@@ -901,6 +984,12 @@ def save_analysis_result(
         person_count=person_count,
         overall_confidence=overall_confidence,
         needs_review=needs_review,
+    )
+
+    # 再解析時に古いタグが残らないよう、
+    # 新しいタグを書き込む前に既存AIタグを削除する。
+    clear_ai_tags(
+        image_id
     )
 
     for tag_data in tags:
@@ -1106,10 +1195,12 @@ async def analyze_pending_images(
         else:
             failed += 1
 
-        # APIへの連続アクセスを少し緩和する。
-        await asyncio.sleep(
-            1
-        )
+        if PHOTO_AI_REQUEST_INTERVAL > 0:
+
+            # APIへの連続アクセスを少し緩和する。
+            await asyncio.sleep(
+                PHOTO_AI_REQUEST_INTERVAL
+            )
 
     return {
         "requested": limit,
@@ -1146,6 +1237,9 @@ def get_photo_ai_status() -> dict[str, Any]:
         "max_file_size": (
             PHOTO_AI_MAX_FILE_SIZE
         ),
+        "request_interval": (
+            PHOTO_AI_REQUEST_INTERVAL
+        ),
     }
 
 
@@ -1177,6 +1271,10 @@ async def main() -> None:
     print(
         "一度の解析件数:",
         status["batch_limit"],
+    )
+    print(
+        "解析間隔:",
+        status["request_interval"],
     )
     print("=" * 50)
 
