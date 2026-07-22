@@ -517,4 +517,3 @@ async def run_photo_archive_once(
             print("=" * 60)
 
         return summary
-
