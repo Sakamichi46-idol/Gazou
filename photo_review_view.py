@@ -1,73 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import closing
 from typing import Any
 
 import discord
 from discord.ext import commands
 
 from photo_database import (
-    get_all_people,
-    get_connection,
+    get_pending_person_reviews,
     set_confirmed_image_people,
 )
-
-
-def _rows(query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    with closing(get_connection()) as connection:
-        cursor = connection.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
-
-
-def _get_pending_reviews(limit: int = 100) -> list[dict[str, Any]]:
-    return _rows(
-        """
-        SELECT
-            photo_review_queue.id AS review_id,
-            photo_review_queue.image_id,
-            photo_review_queue.question,
-            photo_review_queue.candidates,
-            photo_images.image_url,
-            photo_images.local_path,
-            photo_images.image_index,
-            photo_blogs.group_name,
-            photo_blogs.member_name,
-            photo_blogs.title,
-            photo_blogs.published_at,
-            COALESCE(photo_ai_analysis.person_name, '') AS ai_person_name,
-            COALESCE(
-                (
-                    SELECT GROUP_CONCAT(person_name, '、')
-                    FROM photo_image_people
-                    WHERE photo_image_people.image_id = photo_images.id
-                      AND relation_status = 'candidate'
-                ),
-                ''
-            ) AS candidate_people,
-            COALESCE(
-                (
-                    SELECT GROUP_CONCAT(person_name, '、')
-                    FROM photo_image_people
-                    WHERE photo_image_people.image_id = photo_images.id
-                      AND relation_status = 'confirmed'
-                ),
-                ''
-            ) AS confirmed_people
-        FROM photo_review_queue
-        JOIN photo_images
-            ON photo_images.id = photo_review_queue.image_id
-        JOIN photo_blogs
-            ON photo_blogs.id = photo_images.blog_id
-        LEFT JOIN photo_ai_analysis
-            ON photo_ai_analysis.image_id = photo_images.id
-        WHERE photo_review_queue.status = 'pending'
-          AND photo_review_queue.review_type = 'person_identity'
-        ORDER BY photo_review_queue.id ASC
-        LIMIT ?
-        """,
-        (max(1, int(limit)),),
-    )
 
 
 def _split_names(*values: Any) -> list[str]:
@@ -427,6 +369,22 @@ class PhotoReviewView(discord.ui.View):
         )
         self.stop()
 
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item[Any],
+    ) -> None:
+        print(f"写真レビュー画面エラー: {error}")
+        message = "⚠️ 操作中にエラーが発生しました。もう一度 `!review_list` を実行してください。"
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
     async def on_timeout(self) -> None:
         for child in self.children:
             if hasattr(child, "disabled"):
@@ -439,7 +397,7 @@ class PhotoReviewView(discord.ui.View):
 
 
 async def send_photo_review_view(ctx: commands.Context, limit: int = 100) -> None:
-    reviews = await asyncio.to_thread(_get_pending_reviews, limit)
+    reviews = await asyncio.to_thread(get_pending_person_reviews, limit)
     if not reviews:
         await ctx.send("✅ 画像の確認待ちはありません。")
         return
