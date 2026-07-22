@@ -42,6 +42,7 @@ from photo_archive_runner import (
     request_photo_archive_stop,
     run_photo_archive_once,
 )
+from photo_commands import register_photo_commands
 
 
 # =========================
@@ -57,6 +58,8 @@ bot = commands.Bot(
     command_prefix="!",
     intents=intents
 )
+
+register_photo_commands(bot)
 
 # =========================
 # チャンネル設定
