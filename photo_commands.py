@@ -24,6 +24,7 @@ from photo_database import (
 )
 from photo_image_downloader import download_photo_image
 from photo_search import send_photo_search_results, send_photo_author_search_results
+from photo_review_view import send_photo_review_view
 
 
 def _now() -> str:
@@ -394,29 +395,9 @@ def register_photo_commands(bot: commands.Bot) -> None:
 
     @bot.command(name="review_list")
     @commands.is_owner()
-    async def review_list_command(ctx: commands.Context, limit: int = 10) -> None:
-        limit = max(1, min(int(limit), 30))
-        reviews = await asyncio.to_thread(
-            _rows,
-            """
-            SELECT photo_review_queue.id, photo_review_queue.image_id,
-                   photo_review_queue.review_type, photo_review_queue.question,
-                   photo_review_queue.candidates
-            FROM photo_review_queue
-            WHERE status = 'pending'
-            ORDER BY id
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        if not reviews:
-            await ctx.send("✅ 画像の確認待ちはありません。")
-            return
-        lines = [
-            f"`Review {x['id']}` 画像ID `{x['image_id']}` / {x['review_type']}\n{x['question']}\n候補: {x['candidates']}"
-            for x in reviews
-        ]
-        await ctx.send("🧐 **確認待ち一覧**\n\n" + "\n\n".join(lines))
+    async def review_list_command(ctx: commands.Context, limit: int = 100) -> None:
+        limit = max(1, min(int(limit), 500))
+        await send_photo_review_view(ctx, limit=limit)
 
     @bot.command(name="review_done")
     @commands.is_owner()
