@@ -2628,6 +2628,169 @@ def search_images_by_person(
 
 
 # =========================
+# 写真キーワード検索
+# =========================
+
+def search_photo_images(
+    query: str,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    ブログ情報・AI解析結果・AIタグ・手動タグを横断して画像を検索する。
+
+    空白区切りの複数キーワードはAND検索になる。
+    例:
+        菅原咲月
+        浴衣
+        菅原咲月 浴衣
+    """
+
+    keywords = [
+        keyword.strip()
+        for keyword in str(query).replace("　", " ").split()
+        if keyword.strip()
+    ]
+
+    if not keywords:
+        return []
+
+    limit = max(
+        1,
+        min(int(limit), 50),
+    )
+
+    conditions: list[str] = []
+    parameters: list[Any] = []
+
+    for keyword in keywords:
+        like_value = f"%{keyword}%"
+
+        conditions.append(
+            """
+            (
+                photo_blogs.group_name LIKE ?
+                OR photo_blogs.member_name LIKE ?
+                OR photo_blogs.title LIKE ?
+                OR photo_blogs.published_at LIKE ?
+                OR COALESCE(photo_ai_analysis.person_name, '') LIKE ?
+                OR COALESCE(photo_ai_analysis.clothing, '') LIKE ?
+                OR COALESCE(photo_ai_analysis.expression, '') LIKE ?
+                OR COALESCE(photo_ai_analysis.background, '') LIKE ?
+                OR COALESCE(photo_ai_analysis.pose, '') LIKE ?
+                OR COALESCE(photo_ai_analysis.objects, '') LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM photo_ai_tags
+                    WHERE photo_ai_tags.image_id = photo_images.id
+                    AND photo_ai_tags.tag LIKE ?
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM photo_manual_tags
+                    WHERE photo_manual_tags.image_id = photo_images.id
+                    AND photo_manual_tags.tag LIKE ?
+                )
+            )
+            """
+        )
+
+        parameters.extend(
+            [like_value] * 12
+        )
+
+    where_clause = " AND ".join(
+        conditions
+    )
+
+    parameters.append(
+        limit
+    )
+
+    with closing(
+        get_connection()
+    ) as connection:
+
+        cursor = connection.execute(
+            f"""
+            SELECT
+                photo_images.*,
+
+                photo_blogs.blog_url,
+                photo_blogs.group_name,
+                photo_blogs.member_name,
+                photo_blogs.title,
+                photo_blogs.published_at,
+
+                COALESCE(photo_ai_analysis.person_name, '')
+                    AS ai_person_name,
+                COALESCE(photo_ai_analysis.clothing, '')
+                    AS clothing,
+                COALESCE(photo_ai_analysis.expression, '')
+                    AS expression,
+                COALESCE(photo_ai_analysis.background, '')
+                    AS background,
+                COALESCE(photo_ai_analysis.pose, '')
+                    AS pose,
+                COALESCE(photo_ai_analysis.objects, '')
+                    AS objects,
+
+                COALESCE(
+                    (
+                        SELECT GROUP_CONCAT(tag, '、')
+                        FROM (
+                            SELECT tag
+                            FROM photo_ai_tags
+                            WHERE photo_ai_tags.image_id = photo_images.id
+                            ORDER BY confidence DESC, id ASC
+                            LIMIT 12
+                        )
+                    ),
+                    ''
+                ) AS ai_tags,
+
+                COALESCE(
+                    (
+                        SELECT GROUP_CONCAT(tag, '、')
+                        FROM (
+                            SELECT tag
+                            FROM photo_manual_tags
+                            WHERE photo_manual_tags.image_id = photo_images.id
+                            ORDER BY id ASC
+                            LIMIT 12
+                        )
+                    ),
+                    ''
+                ) AS manual_tags
+
+            FROM photo_images
+
+            INNER JOIN photo_blogs
+                ON photo_images.blog_id = photo_blogs.id
+
+            LEFT JOIN photo_ai_analysis
+                ON photo_images.id = photo_ai_analysis.image_id
+
+            WHERE
+                photo_images.download_status = 'completed'
+                AND photo_images.local_path != ''
+                AND ({where_clause})
+
+            ORDER BY
+                photo_blogs.published_at DESC,
+                photo_images.image_index ASC,
+                photo_images.id DESC
+
+            LIMIT ?
+            """,
+            tuple(parameters),
+        )
+
+        return rows_to_dicts(
+            cursor.fetchall()
+        )
+
+
+# =========================
 # 件数確認
 # =========================
 
