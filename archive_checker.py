@@ -1,31 +1,52 @@
 import asyncio
+import os
 import traceback
 
 import aiohttp
 
 from archive_config import (
     ARCHIVE_TARGET_GROUP,
-    ARCHIVE_TEST_LIMIT
+    ARCHIVE_TEST_LIMIT,
 )
 
 from archive_database import (
-    filter_not_archived
+    filter_not_archived,
 )
 
 from archive_parsers.utils import (
-    blog_datetime_key
+    blog_datetime_key,
 )
 
 from archive_parsers.nogizaka import (
-    get_oldest_first as get_nogizaka
+    get_oldest_first as get_nogizaka,
 )
 
 from archive_parsers.sakurazaka import (
-    get_oldest_first as get_sakurazaka
+    get_oldest_first as get_sakurazaka,
 )
 
 from archive_parsers.hinatazaka import (
-    get_oldest_first as get_hinatazaka
+    get_oldest_first as get_hinatazaka,
+)
+
+
+# =========================
+# 2レーン設定
+# =========================
+
+# 未保存記事のうち、新しい記事を何件まで優先するか
+#
+# RailwayのVariablesで、
+# ARCHIVE_PRIORITY_LIMIT=5
+# のように変更可能
+ARCHIVE_PRIORITY_LIMIT = max(
+    int(
+        os.getenv(
+            "ARCHIVE_PRIORITY_LIMIT",
+            "5",
+        )
+    ),
+    0,
 )
 
 
@@ -73,22 +94,19 @@ def get_selected_parsers():
         or "all"
     ).strip().lower()
 
-
     if target == "all":
 
         return ALL_PARSERS.copy()
-
 
     group_name = GROUP_ALIASES.get(
         target
     )
 
-
     if not group_name:
 
         print(
             "⚠️ ARCHIVE_TARGET_GROUPの値が不正です:",
-            ARCHIVE_TARGET_GROUP
+            ARCHIVE_TARGET_GROUP,
         )
 
         print(
@@ -98,19 +116,16 @@ def get_selected_parsers():
 
         return {}
 
-
     parser = ALL_PARSERS.get(
         group_name
     )
-
 
     if not parser:
 
         return {}
 
-
     return {
-        group_name: parser
+        group_name: parser,
     }
 
 
@@ -121,7 +136,7 @@ def get_selected_parsers():
 async def run_parser(
     group,
     parser,
-    session
+    session,
 ):
 
     print("=" * 50)
@@ -130,13 +145,11 @@ async def run_parser(
         f"[{group}] 巡回開始"
     )
 
-
     try:
 
         result = await parser(
             session
         )
-
 
         if not result:
 
@@ -146,50 +159,47 @@ async def run_parser(
 
             return []
 
-
         valid_blogs = []
-
 
         for blog in result:
 
             if not isinstance(
                 blog,
-                dict
+                dict,
             ):
 
                 continue
 
-
-            url = blog.get(
-                "url",
-                ""
-            )
-
+            url = str(
+                blog.get(
+                    "url",
+                    "",
+                )
+            ).strip()
 
             if not url:
 
                 continue
 
+            blog["url"] = url
 
             # groupが空の場合に補完
-            if not blog.get("group"):
+            if not blog.get(
+                "group"
+            ):
 
                 blog["group"] = group
-
 
             valid_blogs.append(
                 blog
             )
-
 
         print(
             f"[{group}] "
             f"{len(valid_blogs)}件取得"
         )
 
-
         return valid_blogs
-
 
     except asyncio.CancelledError:
 
@@ -199,12 +209,11 @@ async def run_parser(
 
         raise
 
-
-    except Exception as e:
+    except Exception as error:
 
         print(
             f"[{group}] 取得エラー:",
-            e
+            error,
         )
 
         traceback.print_exc()
@@ -220,7 +229,6 @@ async def get_all_blogs():
 
     selected_parsers = get_selected_parsers()
 
-
     if not selected_parsers:
 
         print(
@@ -229,93 +237,80 @@ async def get_all_blogs():
 
         return []
 
-
     print(
         "今回の対象グループ:",
         ", ".join(
             selected_parsers.keys()
-        )
+        ),
     )
-
 
     timeout = aiohttp.ClientTimeout(
         total=None,
         connect=30,
-        sock_read=60
+        sock_read=60,
     )
-
 
     connector = aiohttp.TCPConnector(
         limit=20,
         limit_per_host=8,
-        ttl_dns_cache=300
+        ttl_dns_cache=300,
     )
-
 
     async with aiohttp.ClientSession(
         timeout=timeout,
-        connector=connector
+        connector=connector,
     ) as session:
-
 
         tasks = [
             run_parser(
                 group,
                 parser,
-                session
+                session,
             )
             for group, parser
             in selected_parsers.items()
         ]
 
-
         results = await asyncio.gather(
             *tasks,
-            return_exceptions=True
+            return_exceptions=True,
         )
-
 
     blogs = []
 
-
     for group, result in zip(
         selected_parsers.keys(),
-        results
+        results,
     ):
-
 
         if isinstance(
             result,
-            asyncio.CancelledError
+            asyncio.CancelledError,
         ):
 
             raise result
 
-
         if isinstance(
             result,
-            Exception
+            Exception,
         ):
 
             print(
                 f"[{group}] タスク実行エラー:",
-                result
+                result,
             )
 
             continue
 
-
         blogs.extend(
             result
         )
-
 
     print("=" * 50)
 
     print(
         f"取得合計: {len(blogs)}件"
     )
-
 
     return blogs
 
@@ -325,31 +320,35 @@ async def get_all_blogs():
 # =========================
 
 def remove_duplicate_urls(
-    blogs
+    blogs,
 ):
 
     unique_blogs = []
-
     seen_urls = set()
-
 
     for blog in blogs:
 
-        url = blog.get(
-            "url",
-            ""
-        )
+        if not isinstance(
+            blog,
+            dict,
+        ):
 
+            continue
+
+        url = str(
+            blog.get(
+                "url",
+                "",
+            )
+        ).strip()
 
         if not url:
 
             continue
 
-
         if url in seen_urls:
 
             continue
-
 
         seen_urls.add(
             url
@@ -359,162 +358,27 @@ def remove_duplicate_urls(
             blog
         )
 
-
     return unique_blogs
 
 
 # =========================
-# archive_main用
+# 記事ログ
 # =========================
 
-async def get_archive_targets():
-
-    # -------------------------
-    # ブログ一覧取得
-    # -------------------------
-
-    blogs = await get_all_blogs()
-
-
-    if not blogs:
-
-        print(
-            "取得できたブログはありません。"
-        )
-
-        return []
-
-
-    # -------------------------
-    # URL重複除去
-    # -------------------------
-
-    before_duplicate_count = len(
-        blogs
-    )
-
-
-    blogs = remove_duplicate_urls(
-        blogs
-    )
-
-
-    print(
-        "URL重複除去:",
-        f"{before_duplicate_count}件",
-        "→",
-        f"{len(blogs)}件"
-    )
-
-
-    # -------------------------
-    # 時系列順にソート
-    # -------------------------
-
-    blogs.sort(
-        key=blog_datetime_key
-    )
-
-
-    if blogs:
-
-        print(
-            "取得記事の最古:",
-            blogs[0].get(
-                "date",
-                "不明"
-            ),
-            blogs[0].get(
-                "url",
-                ""
-            )
-        )
-
-        print(
-            "取得記事の最新:",
-            blogs[-1].get(
-                "date",
-                "不明"
-            ),
-            blogs[-1].get(
-                "url",
-                ""
-            )
-        )
-
-
-    # -------------------------
-    # DB登録済みを除外
-    # -------------------------
-
-    print(
-        "DB登録済みURLを確認中..."
-    )
-
-
-    before_archive_filter = len(
-        blogs
-    )
-
-
-    blogs = filter_not_archived(
-        blogs
-    )
-
-
-    print(
-        "未保存記事:",
-        f"{before_archive_filter}件",
-        "→",
-        f"{len(blogs)}件"
-    )
-
-
-    # DB除外後も念のため再ソート
-    blogs.sort(
-        key=blog_datetime_key
-    )
-
-
-    # -------------------------
-    # テスト件数制限
-    # -------------------------
-
-    if ARCHIVE_TEST_LIMIT > 0:
-
-        original_count = len(
-            blogs
-        )
-
-
-        blogs = blogs[
-            :ARCHIVE_TEST_LIMIT
-        ]
-
-
-        print(
-            "テスト件数制限:",
-            f"{original_count}件",
-            "→",
-            f"{len(blogs)}件"
-        )
-
-
-    # -------------------------
-    # 最終確認ログ
-    # -------------------------
+def print_blog_list(
+    title,
+    blogs,
+):
 
     print("=" * 50)
 
     print(
-        f"今回の送信対象: "
-        f"{len(blogs)}件"
+        f"{title}: {len(blogs)}件"
     )
-
 
     for index, blog in enumerate(
         blogs,
-        start=1
+        start=1,
     ):
 
         print(
@@ -525,8 +389,289 @@ async def get_archive_targets():
             f"{blog.get('title', '無題')}"
         )
 
-
     print("=" * 50)
 
 
+# =========================
+# 未保存記事を取得
+# =========================
+
+async def get_unarchived_blogs():
+    """
+    全グループの記事を取得して、
+    URL重複とDB登録済み記事を除外する。
+
+    戻り値は古い順。
+    """
+
+    # -------------------------
+    # ブログ一覧取得
+    # -------------------------
+
+    blogs = await get_all_blogs()
+
+    if not blogs:
+
+        print(
+            "取得できたブログはありません。"
+        )
+
+        return []
+
+    # -------------------------
+    # URL重複除去
+    # -------------------------
+
+    before_duplicate_count = len(
+        blogs
+    )
+
+    blogs = remove_duplicate_urls(
+        blogs
+    )
+
+    print(
+        "URL重複除去:",
+        f"{before_duplicate_count}件",
+        "→",
+        f"{len(blogs)}件",
+    )
+
+    # -------------------------
+    # 古い順にソート
+    # -------------------------
+
+    blogs.sort(
+        key=blog_datetime_key
+    )
+
+    if blogs:
+
+        print(
+            "取得記事の最古:",
+            blogs[0].get(
+                "date",
+                "不明",
+            ),
+            blogs[0].get(
+                "url",
+                "",
+            ),
+        )
+
+        print(
+            "取得記事の最新:",
+            blogs[-1].get(
+                "date",
+                "不明",
+            ),
+            blogs[-1].get(
+                "url",
+                "",
+            ),
+        )
+
+    # -------------------------
+    # DB登録済みを除外
+    # -------------------------
+
+    print(
+        "DB登録済みURLを確認中..."
+    )
+
+    before_archive_filter = len(
+        blogs
+    )
+
+    blogs = filter_not_archived(
+        blogs
+    )
+
+    print(
+        "未保存記事:",
+        f"{before_archive_filter}件",
+        "→",
+        f"{len(blogs)}件",
+    )
+
+    # DB除外後も古い順にする
+    blogs.sort(
+        key=blog_datetime_key
+    )
+
     return blogs
+
+
+# =========================
+# 2レーンへ振り分け
+# =========================
+
+async def get_archive_lanes():
+    """
+    未保存記事を次の2レーンへ分割する。
+
+    priority:
+        新しい未保存記事。
+        最新側から最大ARCHIVE_PRIORITY_LIMIT件。
+
+    history:
+        priorityに含まれなかった過去記事。
+        古い順に処理する。
+
+    同じ記事が両方のレーンに入ることはない。
+    """
+
+    blogs = await get_unarchived_blogs()
+
+    if not blogs:
+
+        return {
+            "priority": [],
+            "history": [],
+        }
+
+    # -------------------------
+    # 新着優先レーン
+    # -------------------------
+
+    if ARCHIVE_PRIORITY_LIMIT > 0:
+
+        priority_blogs = blogs[
+            -ARCHIVE_PRIORITY_LIMIT:
+        ]
+
+    else:
+
+        priority_blogs = []
+
+    # 新着レーン内は新しい順
+    priority_blogs = list(
+        reversed(
+            priority_blogs
+        )
+    )
+
+    priority_urls = {
+        blog.get(
+            "url",
+            "",
+        )
+        for blog in priority_blogs
+    }
+
+    # -------------------------
+    # 過去記事レーン
+    # -------------------------
+
+    history_blogs = [
+        blog
+        for blog in blogs
+        if blog.get(
+            "url",
+            "",
+        ) not in priority_urls
+    ]
+
+    # 過去記事は古い順
+    history_blogs.sort(
+        key=blog_datetime_key
+    )
+
+    # -------------------------
+    # 過去記事の件数制限
+    # -------------------------
+
+    if ARCHIVE_TEST_LIMIT > 0:
+
+        original_count = len(
+            history_blogs
+        )
+
+        history_blogs = history_blogs[
+            :ARCHIVE_TEST_LIMIT
+        ]
+
+        print(
+            "過去記事レーン件数制限:",
+            f"{original_count}件",
+            "→",
+            f"{len(history_blogs)}件",
+        )
+
+    print_blog_list(
+        "🚀 新着優先レーン",
+        priority_blogs,
+    )
+
+    print_blog_list(
+        "📚 過去記事レーン",
+        history_blogs,
+    )
+
+    print(
+        "2レーン合計:",
+        f"{len(priority_blogs)}件",
+        "+",
+        f"{len(history_blogs)}件",
+        "=",
+        f"{len(priority_blogs) + len(history_blogs)}件",
+    )
+
+    return {
+        "priority": priority_blogs,
+        "history": history_blogs,
+    }
+
+
+# =========================
+# 新着優先レーンのみ取得
+# =========================
+
+async def get_priority_targets():
+    """
+    新着優先レーンだけを返す。
+    """
+
+    lanes = await get_archive_lanes()
+
+    return lanes[
+        "priority"
+    ]
+
+
+# =========================
+# 従来のarchive_main互換
+# =========================
+
+async def get_archive_targets():
+    """
+    従来のarchive_main.pyとの互換用。
+
+    現時点では新着優先レーンを先頭にし、
+    その後へ過去記事レーンを結合して返す。
+
+    archive_main.pyを2レーン対応へ変更した後は、
+    get_archive_lanes()を直接使用する。
+    """
+
+    lanes = await get_archive_lanes()
+
+    priority_blogs = lanes[
+        "priority"
+    ]
+
+    history_blogs = lanes[
+        "history"
+    ]
+
+    targets = (
+        priority_blogs
+        + history_blogs
+    )
+
+    print_blog_list(
+        "今回の送信対象",
+        targets,
+    )
+
+    return targets
