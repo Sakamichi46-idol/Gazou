@@ -262,7 +262,7 @@ async def process_photo_blog(
         return result
 
     try:
-        image_urls = await get_images(session, blog_url)
+        image_urls = await get_images(blog_url)
     except Exception as error:
         result["status"] = "failed"
         result["error"] = f"画像URL取得エラー: {type(error).__name__}: {error}"
