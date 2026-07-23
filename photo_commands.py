@@ -26,7 +26,7 @@ from photo_database import (
 )
 from photo_image_downloader import download_photo_image
 from photo_search import send_photo_search_results, send_photo_author_search_results
-from photo_review_view import send_photo_review_view
+from photo_review_view import send_photo_edit_view, send_photo_review_view
 
 
 def _now() -> str:
@@ -445,6 +445,12 @@ def register_photo_commands(bot: commands.Bot) -> None:
     async def review_list_command(ctx: commands.Context, limit: int = 100) -> None:
         limit = max(1, min(int(limit), 500))
         await send_photo_review_view(ctx, limit=limit)
+
+    @bot.command(name="photo_edit")
+    @commands.is_owner()
+    async def photo_edit_command(ctx: commands.Context, image_id: int) -> None:
+        """画像IDを指定し、確定済みの人物タグを編集する。"""
+        await send_photo_edit_view(ctx, image_id=image_id)
 
     @bot.command(name="review_done")
     @commands.is_owner()
