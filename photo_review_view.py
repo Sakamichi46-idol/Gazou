@@ -450,7 +450,10 @@ async def send_photo_edit_view(ctx: commands.Context, image_id: int) -> None:
     ]
 
     review = dict(image)
+    # get_photo_image() は主キーを ``id`` で返すため、
+    # レビュー画面が参照する ``image_id`` を明示的に追加する。
     review.update({
+        "image_id": int(image["id"]),
         "review_id": "edit",
         "confirmed_people": "、".join(dict.fromkeys(confirmed)),
         "candidate_people": "、".join(dict.fromkeys(candidates)),
