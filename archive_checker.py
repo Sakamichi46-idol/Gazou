@@ -453,11 +453,35 @@ async def get_priority_targets():
 # =========================
 
 async def get_archive_targets():
-    lanes = await get_archive_lanes()
+    """
+    未保存の記事を、全グループ混在で古い順に返す。
 
-    priority_blogs = lanes["priority"]
-    history_blogs = lanes["history"]
-    targets = priority_blogs + history_blogs
+    乃木坂46・櫻坂46・日向坂46をまとめて、
+    投稿日時が最も古い記事から順番に処理する。
+    """
 
-    print_blog_list("今回の送信対象", targets)
-    return targets
+    blogs = await get_unarchived_blogs()
+
+    if not blogs:
+        print("今回の送信対象はありません。")
+        return []
+
+    blogs.sort(key=blog_datetime_key)
+
+    if ARCHIVE_TEST_LIMIT > 0:
+        original_count = len(blogs)
+        blogs = blogs[:ARCHIVE_TEST_LIMIT]
+
+        print(
+            "アーカイブ対象件数制限:",
+            f"{original_count}件",
+            "→",
+            f"{len(blogs)}件",
+        )
+
+    print_blog_list(
+        "今回の送信対象（古い順）",
+        blogs,
+    )
+
+    return blogs
