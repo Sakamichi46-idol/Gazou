@@ -27,6 +27,7 @@ from photo_database import (
 from photo_image_downloader import download_photo_image
 from photo_search import send_photo_search_results, send_photo_author_search_results
 from photo_review_view import send_photo_edit_view, send_photo_review_view
+from photo_tag_explorer import send_photo_tag_explorer
 
 
 def _now() -> str:
@@ -99,6 +100,11 @@ async def _redownload_one(session: aiohttp.ClientSession, image_id: int) -> dict
 
 
 def register_photo_commands(bot: commands.Bot) -> None:
+
+    @bot.command(name="photo_tags", aliases=["tag_search", "photo_explorer"])
+    async def photo_tags_command(ctx: commands.Context) -> None:
+        """ボタンと選択メニューで写真タグを絞り込む。"""
+        await send_photo_tag_explorer(ctx)
 
     @bot.command(name="photo_search")
     
