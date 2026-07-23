@@ -8,6 +8,8 @@ from discord.ext import commands
 
 from photo_database import (
     get_pending_person_reviews,
+    get_photo_image,
+    get_image_people,
     set_confirmed_image_people,
 )
 
@@ -134,11 +136,14 @@ class PhotoReviewView(discord.ui.View):
         bot: commands.Bot,
         owner_id: int,
         reviews: list[dict[str, Any]],
+        *,
+        edit_mode: bool = False,
     ) -> None:
         super().__init__(timeout=900)
         self.bot = bot
         self.owner_id = int(owner_id)
         self.reviews = reviews
+        self.edit_mode = bool(edit_mode)
         self.index = 0
         self.selected_people: list[str] = []
         self.message: discord.Message | None = None
@@ -248,11 +253,11 @@ class PhotoReviewView(discord.ui.View):
         candidate_text = "\n".join(f"・{name}" for name in candidates) or "候補なし"
 
         embed = discord.Embed(
-            title="🧐 写真人物レビュー",
+            title="✏️ 写真人物タグ編集" if self.edit_mode else "🧐 写真人物レビュー",
             description=(
                 f"**画像ID：{review['image_id']}**\n"
-                f"Review ID：{review['review_id']}\n"
-                f"{self.index + 1}件目 / {len(self.reviews)}件"
+                + (f"編集モード\n" if self.edit_mode else f"Review ID：{review.get('review_id', '-')}\n")
+                + f"{self.index + 1}件目 / {len(self.reviews)}件"
             ),
             color=discord.Color.blurple(),
         )
@@ -282,7 +287,7 @@ class PhotoReviewView(discord.ui.View):
         image_url = str(review.get("image_url") or "").strip()
         if image_url.startswith(("http://", "https://")):
             embed.set_image(url=image_url)
-        embed.set_footer(text="候補を選び、必要なら人物を追加・削除してから「確定」を押してください。")
+        embed.set_footer(text=("現在の登録を修正し、「確定」を押すと上書き保存されます。" if self.edit_mode else "候補を選び、必要なら人物を追加・削除してから「確定」を押してください。"))
         return embed
 
     async def confirm_callback(self, interaction: discord.Interaction) -> None:
@@ -293,10 +298,24 @@ class PhotoReviewView(discord.ui.View):
             int(review["image_id"]),
             names,
             confirmed_by=str(interaction.user.id),
-            note="Discord button review",
+            note="Discord photo edit" if self.edit_mode else "Discord button review",
         )
 
         completed_image_id = int(review["image_id"])
+
+        if self.edit_mode:
+            for child in self.children:
+                if hasattr(child, "disabled"):
+                    child.disabled = True
+            display = "人物なし" if not names else "、".join(names)
+            embed = self.build_embed(
+                notice=f"✅ 画像ID {completed_image_id} の人物を「{display}」に更新しました。"
+            )
+            embed.color = discord.Color.green()
+            await interaction.response.edit_message(embed=embed, view=self)
+            self.stop()
+            return
+
         self.reviews.pop(self.index)
 
         if not self.reviews:
@@ -406,6 +425,42 @@ async def send_photo_review_view(ctx: commands.Context, limit: int = 100) -> Non
         bot=ctx.bot,
         owner_id=ctx.author.id,
         reviews=reviews,
+    )
+    message = await ctx.send(embed=view.build_embed(), view=view)
+    view.message = message
+
+
+async def send_photo_edit_view(ctx: commands.Context, image_id: int) -> None:
+    """確定済みを含む任意の画像について、人物タグ編集画面を開く。"""
+    image = await asyncio.to_thread(get_photo_image, int(image_id))
+    if not image:
+        await ctx.send(f"⚠️ 画像ID **{image_id}** は見つかりません。")
+        return
+
+    people = await asyncio.to_thread(get_image_people, int(image_id))
+    confirmed = [
+        str(row.get("person_name") or "").strip()
+        for row in people
+        if row.get("relation_status") == "confirmed" and str(row.get("person_name") or "").strip()
+    ]
+    candidates = [
+        str(row.get("person_name") or "").strip()
+        for row in people
+        if row.get("relation_status") == "candidate" and str(row.get("person_name") or "").strip()
+    ]
+
+    review = dict(image)
+    review.update({
+        "review_id": "edit",
+        "confirmed_people": "、".join(dict.fromkeys(confirmed)),
+        "candidate_people": "、".join(dict.fromkeys(candidates)),
+    })
+
+    view = PhotoReviewView(
+        bot=ctx.bot,
+        owner_id=ctx.author.id,
+        reviews=[review],
+        edit_mode=True,
     )
     message = await ctx.send(embed=view.build_embed(), view=view)
     view.message = message
