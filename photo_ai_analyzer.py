@@ -4,6 +4,9 @@ import json
 import mimetypes
 import os
 import traceback
+import io
+
+from PIL import Image, ImageOps
 
 from pathlib import Path
 from typing import Any
@@ -112,6 +115,19 @@ PHOTO_AI_BATCH_LIMIT = get_env_int(
 PHOTO_AI_REQUEST_TIMEOUT = get_env_float(
     "PHOTO_AI_REQUEST_TIMEOUT",
     120.0,
+)
+
+
+PHOTO_AI_MAX_DIMENSION = get_env_int(
+    "PHOTO_AI_MAX_DIMENSION",
+    1024,
+    minimum=256,
+)
+
+PHOTO_AI_JPEG_QUALITY = get_env_int(
+    "PHOTO_AI_JPEG_QUALITY",
+    78,
+    minimum=40,
 )
 
 PHOTO_AI_MAX_FILE_SIZE = get_env_int(
@@ -485,25 +501,34 @@ def image_to_data_url(
     image_path: str,
     mime_type: str,
 ) -> str:
-    """
-    ローカル画像をBase64データURLへ変換する。
-    """
+    """AI送信用に画像を縮小・JPEG圧縮してBase64化する。"""
 
-    with open(
-        image_path,
-        "rb",
-    ) as image_file:
+    try:
+        with Image.open(image_path) as source:
+            image = ImageOps.exif_transpose(source)
+            if getattr(image, "is_animated", False):
+                image.seek(0)
+            image = image.convert("RGB")
+            image.thumbnail(
+                (PHOTO_AI_MAX_DIMENSION, PHOTO_AI_MAX_DIMENSION),
+                Image.Resampling.LANCZOS,
+            )
+            buffer = io.BytesIO()
+            image.save(
+                buffer,
+                format="JPEG",
+                quality=min(PHOTO_AI_JPEG_QUALITY, 95),
+                optimize=True,
+            )
+            payload = buffer.getvalue()
+            mime_type = "image/jpeg"
+    except Exception as error:
+        print("AI用画像の縮小に失敗したため元画像を使用します:", error)
+        with open(image_path, "rb") as image_file:
+            payload = image_file.read()
 
-        encoded_image = base64.b64encode(
-            image_file.read()
-        ).decode(
-            "utf-8"
-        )
-
-    return (
-        f"data:{mime_type};"
-        f"base64,{encoded_image}"
-    )
+    encoded_image = base64.b64encode(payload).decode("utf-8")
+    return f"data:{mime_type};base64,{encoded_image}"
 
 
 def validate_image_file(
