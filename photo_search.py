@@ -320,74 +320,21 @@ async def send_photo_search_results(
             total=total,
         )
 
-        local_path = str(
-            result.get("local_path")
-            or ""
-        ).strip()
-
-        file_name = str(
-            result.get("file_name")
-            or ""
-        ).strip()
-
-        if (
-            local_path
-            and os.path.isfile(
-                local_path
-            )
-        ):
-
-            attachment_name = (
-                file_name
-                or os.path.basename(
-                    local_path
-                )
-                or f"photo_{result.get('id', index)}.jpg"
-            )
-
-            try:
-
-                discord_file = discord.File(
-                    local_path,
-                    filename=attachment_name,
-                )
-
-                embed.set_image(
-                    url=(
-                        "attachment://"
-                        f"{attachment_name}"
-                    )
-                )
-
-                await ctx.send(
-                    embed=embed,
-                    file=discord_file,
-                )
-
-                continue
-
-            except Exception as error:
-
-                print(
-                    "検索画像添付エラー:",
-                    local_path,
-                    error,
-                )
-
+        # 通信量節約のため、保存済みローカル画像を再アップロードせず、
+        # 元画像URLをDiscordに直接表示させる。
         image_url = str(
             result.get("image_url")
             or ""
         ).strip()
 
-        if image_url:
-
-            embed.set_image(
-                url=image_url
+        if image_url.startswith(("http://", "https://")):
+            embed.set_image(url=image_url)
+        else:
+            embed.description = (embed.description or "") + (
+                "\n\n⚠️ 表示用URLがないため画像を表示できません。"
             )
 
-        await ctx.send(
-            embed=embed
-        )
+        await ctx.send(embed=embed)
 
 
 async def send_photo_author_search_results(ctx, author_name: str, limit: int = DEFAULT_SEARCH_LIMIT) -> None:
