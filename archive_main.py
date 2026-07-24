@@ -37,6 +37,8 @@ from photo_image_downloader import (
     download_blog_images,
     get_photo_storage_path,
 )
+from low_egress_media import LOW_EGRESS_MODE, send_url_gallery
+
 from photo_archive_runner import (
     is_photo_archive_running,
     request_photo_archive_stop,
@@ -1107,6 +1109,21 @@ async def send_blog_to_channel(
     """
     1チャンネルへEmbedと画像を送信する。
     """
+
+    if LOW_EGRESS_MODE:
+        try:
+            return await send_url_gallery(
+                channel,
+                image_urls,
+                header_embed=embed,
+                send_delay=SEND_DELAY,
+            )
+        except Exception as error:
+            print(
+                "URL画像送信エラー。添付方式へ切り替えます:",
+                getattr(channel, "id", "unknown"),
+                error,
+            )
 
     attachments: list[
         dict[str, Any]
