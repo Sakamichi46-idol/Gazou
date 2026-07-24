@@ -8,6 +8,8 @@ import aiohttp
 import discord
 import imageio_ffmpeg
 
+from low_egress_media import LOW_EGRESS_MODE, send_url_gallery
+
 
 # =========================
 # 設定
@@ -491,6 +493,18 @@ async def send_blog_media(
         )
 
         return
+
+    if LOW_EGRESS_MODE:
+        try:
+            await send_url_gallery(
+                channel,
+                image_urls,
+                content=text,
+                send_delay=send_delay,
+            )
+            return
+        except Exception as error:
+            print("URL画像送信エラー。添付方式へ切り替えます:", error)
 
 
     upload_limit = get_upload_limit(
